@@ -306,7 +306,25 @@
     .set-row .sym { width: 40px; height: 40px; font-size: 20px; }
     .chev { color: var(--muted); font-size: 24px; line-height: 1; padding: 0 4px; }
     .sub-h { margin: 18px 0 2px; font-size: 14px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
+    .preview.tall { max-height: 260px; overflow: auto; }
     .preview { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; margin: 4px 0 0; font: 14px/1.5 ui-monospace, Menlo, Consolas, monospace; white-space: pre-wrap; }
+
+    /* Categorías y base de productos */
+    .row.child { margin-left: 22px; width: calc(100% - 22px); }
+    .cat-main { display: flex; align-items: center; gap: 12px; flex: 1; min-width: 0; }
+    .tag-group { width: 100%; background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 8px; }
+    .tag-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+    .tag-head .linkbtn { font-size: 13px; padding: 4px 2px; }
+    .chip.parent { font-weight: 700; }
+    .search-btn { border: 0; background: var(--accent-soft); color: var(--accent); font-weight: 700; border-radius: 9px; padding: 7px 10px; font-size: 13px; white-space: nowrap; }
+    .db-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); gap: 8px; }
+    .db-item { position: relative; display: grid; justify-items: center; gap: 4px; padding: 10px 6px; border-radius: 12px; border: 1px solid var(--line); background: var(--card); text-align: center; }
+    .db-item.on { border-color: var(--accent); background: var(--accent-soft); box-shadow: 0 0 0 2px var(--accent) inset; }
+    .db-item.have { opacity: .55; }
+    .db-sym { font-size: 28px; line-height: 1; }
+    .db-name { font-size: 13px; line-height: 1.2; }
+    .db-have { font-size: 11px; color: var(--accent); }
+    .sticky-bottom { position: sticky; bottom: 0; margin-top: 14px; box-shadow: 0 -6px 16px var(--bg); }
 
     /* Escáner */
     .scanner { position: fixed; inset: 0; z-index: 90; background: #000; color: #fff; display: flex; flex-direction: column; }
@@ -340,6 +358,7 @@
   <div id="toasts" aria-live="polite"></div>
 
   <datalist id="dl-products"></datalist>
+  <datalist id="dl-basicos"></datalist>
 
   <script type="module" src="app.js"></script>
 </body>

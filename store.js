@@ -3,7 +3,7 @@ import { kvGet, kvSet } from './db.js';
 
 export const GENERAL = 'general';
 export const UNITS = { ud: 'ud.', kg: 'kg', g: 'g', l: 'l', ml: 'ml' };
-export const SCHEMA = 4;
+export const SCHEMA = 5;
 const COLLECTIONS = ['products', 'lists', 'items', 'locations', 'tags', 'stores', 'recipes', 'recipeGroups'];
 
 export const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
@@ -71,7 +71,7 @@ function ensure() {
 // Es determinista: los dos móviles llegan al mismo resultado sin duplicar ubicaciones.
 // Lo que se crea aquí lleva fecha 1 (muy antigua) para que cualquier cambio hecho en el otro móvil gane.
 function normalize() {
-  if (!Object.keys(S.tags).length) seedTags();
+  seedTaxonomy();
   if (!Object.keys(S.recipeGroups).length) seedRecipeGroups();
   for (const p of Object.values(S.products)) {
     if (p.del) continue;
@@ -109,9 +109,30 @@ function seedRecipeGroups() {
   });
 }
 
-const TAG_SEEDS = [['Verdura', '🥬'], ['Fruta', '🍎'], ['Conservas', '🥫']];
-function seedTags() {
-  TAG_SEEDS.forEach(([name, symbol], i) => ensureTag(name, symbol, i));
+// Categorías de alimentación con sus subcategorías. Se crean solas si no existen
+// (las que se hayan borrado no vuelven) y las etiquetas antiguas con el mismo nombre pasan a ser subcategorías.
+export const FOOD_TAXONOMY = ['Alimentación', '🍽️', [
+  ['Fruta', '🍎'], ['Verdura', '🥬'], ['Carne', '🥩'], ['Pescado y marisco', '🐟'], ['Embutidos', '🥓'], ['Lácteos', '🥛'],
+  ['Quesos', '🧀'], ['Huevos', '🥚'], ['Pan y bollería', '🍞'], ['Pasta y arroz', '🍝'], ['Legumbres', '🫘'], ['Conservas', '🥫'],
+  ['Cereales y desayuno', '🥣'], ['Harinas y repostería', '🌾'], ['Aceites y vinagres', '🫒'], ['Especias y condimentos', '🧂'],
+  ['Salsas', '🫙'], ['Café e infusiones', '☕'], ['Dulces y snacks', '🍫'], ['Frutos secos', '🥜'], ['Bebidas', '🥤'],
+  ['Congelados', '🧊'], ['Platos preparados', '🍱'],
+]];
+function seedTaxonomy() {
+  const [pname, psym, kids] = FOOD_TAXONOMY;
+  const pid = ensureTagSeed(pname, psym, null, 0);
+  kids.forEach(([n, sym], i) => ensureTagSeed(n, sym, pid, i));
+}
+function ensureTagSeed(name, symbol, parentId, order) {
+  const id = 'tag-' + hash(norm(name));
+  const found = alive(S.tags).find((t) => norm(t.name) === norm(name)) || S.tags[id];
+  if (found) {
+    if (!found.del && found.parentId === undefined) found.parentId = parentId;
+    if (!found.del && found.order === undefined && order !== undefined) found.order = order;
+    return found.id;
+  }
+  S.tags[id] = { id, name, symbol, parentId, order, u: 1 };
+  return id;
 }
 function ensureTag(name, symbol = '🏷️', order) {
   const found = alive(S.tags).find((t) => norm(t.name) === norm(name));
@@ -276,7 +297,24 @@ export const productInLoc = (p, set) =>
 // ── Etiquetas y tiendas (mismo formato: nombre + símbolo) ──
 export const getTag = (id) => (id && S.tags[id] && !S.tags[id].del ? S.tags[id] : null);
 export const getStore = (id) => (id && S.stores[id] && !S.stores[id].del ? S.stores[id] : null);
-export const tags = () => alive(S.tags).sort(byOrder);
+const tagParent = (t) => (t.parentId && getTag(t.parentId) ? t.parentId : null);
+export const tagChildren = (pid) => alive(S.tags).filter((t) => tagParent(t) === (pid || null)).sort(byOrder);
+// Etiquetas en orden de árbol: cada categoría seguida de sus subcategorías.
+export const tags = () => tagChildren(null).flatMap((t) => [t, ...tagChildren(t.id)]);
+export const tagDepth = (t) => (tagParent(t) ? 1 : 0);
+export const tagFull = (t) => { const p = getTag(tagParent(t)); return p ? `${p.name} › ${t.name}` : t.name; };
+// Id de una categoría de la lista inicial aunque se le haya cambiado el nombre.
+export const tagIdFor = (name) => {
+  const id = 'tag-' + hash(norm(name));
+  return getTag(id) ? id : tags().find((t) => norm(t.name) === norm(name))?.id || null;
+};
+// ¿Es comida? (sin categorías: se considera que sí)
+export const isFood = (p) => {
+  const food = tagIdFor(FOOD_TAXONOMY[0]);
+  return !(p.tags || []).length || !food || productHasTag(p, food);
+};
+// ¿Tiene el artículo esta etiqueta (o una subcategoría suya)?
+export const productHasTag = (p, tagId) => !tagId || (p.tags || []).some((id) => id === tagId || tagParent(getTag(id) || {}) === tagId);
 export const stores = () => alive(S.stores).sort(byOrder);
 export const productTags = (p) => (p.tags || []).map(getTag).filter(Boolean);
 export const productStores = (p) => (p.stores || []).map(getStore).filter(Boolean);
@@ -288,6 +326,7 @@ export function putCatalog(kind, rec) {
 }
 export function deleteCatalog(kind, id) {
   const t = now();
+  if (kind === 'tags') for (const c of alive(S.tags)) if (c.parentId === id) { c.parentId = null; c.u = t; }
   const field = kind === 'tags' ? 'tags' : 'stores';
   for (const p of alive(S.products)) if ((p[field] || []).includes(id)) { p[field] = p[field].filter((x) => x !== id); p.u = t; }
   if (kind === 'stores') for (const it of alive(S.items)) if (it.storeId === id) { it.storeId = null; it.u = t; }
@@ -295,7 +334,7 @@ export function deleteCatalog(kind, id) {
   commit();
 }
 export function moveCatalogOrder(kind, id, dir) {
-  const arr = catalog(kind);
+  const arr = kind === 'tags' ? tagChildren(tagParent(getTag(id) || {})) : stores();
   const i = arr.findIndex((x) => x.id === id);
   const j = i + dir;
   if (i < 0 || j < 0 || j >= arr.length) return;

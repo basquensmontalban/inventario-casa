@@ -1,9 +1,9 @@
 // Service worker: guarda la app en el móvil para que abra sin conexión.
 // Al publicar cambios, sube el número de versión para forzar la actualización.
-const VERSION = 'inv-v1.4.0';
+const VERSION = 'inv-v1.5.0';
 const SHELL = [
   './', './index.html', './app.js', './store.js', './db.js', './google.js', './scanner.js', './config.js',
-  './ui.js', './device.js', './locations.js', './shop.js', './settings.js', './backup.js', './catalog.js', './stores.js', './recipes.js',
+  './ui.js', './device.js', './locations.js', './shop.js', './settings.js', './backup.js', './catalog.js', './stores.js', './recipes.js', './basicos.js', './productdb.js',
   './manifest.webmanifest', './icon-192.png', './icon-512.png', './apple-touch-icon.png',
 ];
 const LIB_HOST = 'unpkg.com';

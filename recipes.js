@@ -70,6 +70,7 @@ export function renderRecipes(m) {
       h('div', { class: 'search' }, icon('search'), search),
       h('div', { class: 'chips', id: 'recChips' }),
       h('div', { class: 'toolbar' },
+        h('button', { class: 'btn small', onclick: askClaudeSheet }, '✨ Ideas con lo que tengo'),
         h('button', { class: 'btn small', onclick: importSheet }, icon('download'), 'Importar receta'),
         h('button', { class: 'btn small', onclick: openGroups }, '⚙ Filtros de recetas')),
       h('div', { class: 'list', id: 'recList' }),
@@ -579,4 +580,46 @@ function importSheet() {
     ta,
     h('button', { class: 'btn block', onclick: () => doImport(ta.value) }, 'Importar texto pegado'),
   ]);
+}
+
+// ── Pedir ideas a Claude con lo que hay en casa ──
+export function pantryText({ onlyHand = true, withRecipes = true } = {}) {
+  const qty = (p) => (onlyHand ? st.atHand(p) : st.total(p));
+  const ps = st.products().filter((p) => qty(p) > 0 && st.isFood(p));
+  const soon = [];
+  const lines = ['Hola Claude. Recomiéndame recetas para importar en mi app «Inventario de casa» con lo que tengo en casa.', ''];
+  lines.push(`Lo que tengo${onlyHand ? ' a mano' : ''}:`);
+  for (const p of ps) {
+    const lots = (p.lots || []).filter((l) => +l.qty > 0 && (!onlyHand || !st.isReserve(l.locationId)));
+    const exp = lots.map((l) => l.expiry).filter(Boolean).sort()[0];
+    const state = lots.map((l) => st.expiryState(p, l)).find(Boolean);
+    if (state) soon.push(p.name);
+    lines.push(`- ${p.name}: ${st.fmtQty(qty(p), p.unit)}${exp ? ` (caduca ${st.fmtDate(exp)})` : ''}`);
+  }
+  if (!ps.length) lines.push('- (nada registrado todavía)');
+  if (soon.length) lines.push('', `Caduca pronto, úsalo primero: ${soon.join(', ')}.`);
+  const rs = st.recipes();
+  if (withRecipes && rs.length) lines.push('', `Ya tengo estas recetas (no las repitas): ${rs.map((r) => r.name).join(', ')}.`);
+  lines.push('', 'Doy por hecho que hay sal, agua y pimienta.');
+  return lines.join('\n');
+}
+
+function askClaudeSheet() {
+  const opts = { onlyHand: true, withRecipes: true };
+  const pre = h('pre', { class: 'preview tall' });
+  const draw = () => { pre.textContent = pantryText(opts); };
+  openSheet('Ideas con lo que tengo', () => {
+    draw();
+    return [
+      h('p', { class: 'muted' }, 'Copia este texto y pégalo en una conversación con Claude. Te propondrá recetas con lo que tienes (empezando por lo que caduca antes) y te pasará el archivo para importarlas aquí.'),
+      toggle('Solo lo que está a mano (sin la reserva)', opts.onlyHand, null, (v) => { opts.onlyHand = v; draw(); }),
+      toggle('Decirle qué recetas ya tengo', opts.withRecipes, null, (v) => { opts.withRecipes = v; draw(); }),
+      pre,
+      h('div', { class: 'actions two' },
+        h('button', { class: 'btn primary', onclick: async () => toast((await copyText(pantryText(opts))) ? 'Copiado. Pégalo en Claude' : 'No se pudo copiar') }, icon('copy'), 'Copiar'),
+        navigator.share
+          ? h('button', { class: 'btn', onclick: () => navigator.share({ text: pantryText(opts) }).catch(() => {}) }, icon('share'), 'Compartir')
+          : h('span')),
+    ];
+  });
 }

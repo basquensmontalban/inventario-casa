@@ -290,6 +290,7 @@ function buy(id) {
   const s = openSheet('Comprado: ' + p.name, () => [
     field('Marca', vSel),
     h('div', { class: 'grid2' }, field(`Cantidad (${UNITS[p.unit || 'ud']})`, qIn), field('Caducidad (opcional)', eIn)),
+    nav.expiryHint(p, eIn),
     field('Dónde lo guardas', where),
     h('button', { class: 'btn primary block', onclick: () => {
       const q = num(qIn.value);

@@ -9,7 +9,7 @@ import { locSelect, openLocations } from './locations.js';
 import { openCatalog, label } from './catalog.js';
 import { openGroups } from './recipes.js';
 
-export const VERSION = '1.4.0';
+export const VERSION = '1.5.0';
 
 const pl = (n, one, many) => `${n} ${n === 1 ? one : many}`;
 const TAB_NAMES = { inv: 'Inventario', shop: 'Compra', recipes: 'Recetas', stores: 'Tiendas' };
@@ -41,7 +41,7 @@ export function renderSettings(m) {
     h('div', { class: 'set-h' }, h('h3', {}, 'Común a los dos móviles')),
     h('div', { class: 'list' },
       row('📍', 'Ubicaciones', pl(n(S.locations), 'ubicación', 'estancias, muebles y estantes'), openLocations),
-      row('🏷️', 'Etiquetas', pl(st.tags().length, 'etiqueta', 'etiquetas'), () => openCatalog('tags')),
+      row('🏷️', 'Categorías', `${pl(st.tagChildren(null).length, 'categoría', 'categorías')} · ${pl(st.tags().length - st.tagChildren(null).length, 'subcategoría', 'subcategorías')}`, () => openCatalog('tags')),
       row('🏬', 'Lista de tiendas', pl(st.stores().length, 'tienda', 'tiendas'), () => openCatalog('stores')),
       row('📝', 'Listas de la compra', pl(st.lists().length, 'lista', 'listas'), openLists),
       row('⚙️', 'Filtros de recetas', st.recipeGroups().map((x) => x.name).join(', ') || 'Ninguno', openGroups),
@@ -91,7 +91,7 @@ function secInventory() {
     dSel('Ordenar los artículos', [['name', 'Por nombre'], ['location', 'Por ubicación'], ['expiry', 'Por caducidad (lo que antes caduca)'], ['qty', 'Por cantidad (lo que menos hay)']], 'invSort'),
     dTog('Mostrar artículos agotados', 'invShowEmpty', 'Si lo apagas, solo salen al buscar o con el filtro «Agotado»'),
     sub('Filtros que se ven'),
-    dTogIn('Ubicación', 'invFilters', 'loc'), dTogIn('Etiquetas', 'invFilters', 'tag'), dTogIn('Tiendas', 'invFilters', 'store'),
+    dTogIn('Ubicación', 'invFilters', 'loc'), dTogIn('Categorías', 'invFilters', 'tag'), dTogIn('Tiendas', 'invFilters', 'store'),
     dTogIn('Caduca pronto', 'invFilters', 'soon'), dTogIn('Bajo mínimo', 'invFilters', 'low'), dTogIn('Agotado', 'invFilters', 'empty'),
     dTogIn('Con reserva', 'invFilters', 'reserve'), dTogIn('Críticos', 'invFilters', 'critical'),
     sub('Valores para artículos nuevos'),

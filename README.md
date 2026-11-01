@@ -85,9 +85,18 @@ En **Ajustes › Ubicaciones** creas estancias, muebles y estantes (hasta 3 nive
 Las existencias de un artículo pueden estar repartidas: lo que está en reserva no cuenta como «a mano» ni para el mínimo de compra.
 Desde la ficha de un artículo puedes mover existencias de un sitio a otro o «traer de la reserva».
 
+## Categorías y base de productos
+
+- **Categorías con subcategorías** (Ajustes › Categorías): viene «🍽️ Alimentación» con 23 subcategorías típicas (fruta, verdura, carne, pescado, lácteos, conservas, legumbres…), cada una con su símbolo. Puedes crear otras categorías (Limpieza, Higiene, Mascotas…) y sus subcategorías. Filtrar por una categoría incluye sus subcategorías.
+- **Base de productos básicos** (botón «＋ Básicos» en el inventario): 170 productos habituales con símbolo, subcategoría, unidad, dónde se guardan (nevera, congelador o despensa, si tienes ubicaciones con esos nombres) y cuánto suelen durar. Marca varios y se crean de golpe. En «Nuevo artículo», al escribir el nombre de un básico se rellenan solos esos datos.
+- **Caducidad aproximada**: al añadir existencias de un básico aparece «Poner dd/mm (aprox.)». Es orientativa: revisa la etiqueta.
+
+## Ideas de recetas con lo que tienes
+
+En Recetas › «✨ Ideas con lo que tengo» se genera un texto con lo que hay en casa (solo comida, por defecto solo lo que está a mano), lo que caduca pronto y las recetas que ya tienes. Cópialo y pégalo en Claude: te propondrá recetas y te pasará el archivo para importarlas.
+
 ## Etiquetas y tiendas
 
-- **Etiquetas** (Ajustes › Etiquetas y tiendas): cada una con su símbolo. Un artículo puede tener varias y se filtra por ellas en el inventario. Las antiguas «categorías» se convirtieron en etiquetas.
 - **Tiendas**: en cada artículo indicas dónde se compra. Se puede filtrar por tienda en el inventario y en la compra (lo que no tiene tienda sale aparte).
 - **Pestaña Tiendas**: para cada tienda, lo que hay que comprar allí, sugerencias («quizás también»: lo que se ha acabado, está por debajo de lo que soléis tener o caduca pronto) y todo lo que soléis comprar allí.
 
