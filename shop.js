@@ -4,8 +4,14 @@ import { S, GENERAL, UNITS, uid } from './store.js';
 import { D } from './device.js';
 import { h, icon, badge, field, inp, select, numInput, num, openSheet, toast, copyText, nav } from './ui.js';
 import { locSelect, fromReserveSheet } from './locations.js';
+import { label } from './catalog.js';
 
-const ui = { list: '__all', showDismissed: false };
+const ui = { list: '__all', showDismissed: false, store: '', init: false };
+
+// Filtro por tienda: los que se compran en ella / los que no tienen tienda asignada.
+const inStore = (it, sid) => st.itemStoreIds(it).includes(sid);
+const noStore = (it) => !st.itemStoreIds(it).length;
+const byStore = (its) => (ui.store ? its.filter((it) => inStore(it, ui.store)) : its);
 
 export const shopItems = (listId) => st.alive(S.items).filter((it) => !it.done && !it.dismissed && (!listId || it.listId === listId));
 
@@ -13,12 +19,24 @@ function itemInfo(it) {
   const p = it.productId && S.products[it.productId] && !S.products[it.productId].del ? S.products[it.productId] : null;
   return { p, name: p ? p.name : it.name || '?', unit: p ? p.unit || 'ud' : 'ud', brand: p ? st.fav(p)?.brand : null };
 }
-const sortItems = (its) => [...its].sort((a, b) => itemInfo(a).name.localeCompare(itemInfo(b).name, 'es'));
+// Orden de la lista: por nombre o por la ubicación habitual del artículo (para ir recorriendo la casa).
+const sortItems = (its) => [...its].sort((a, b) => {
+  const A = itemInfo(a);
+  const B = itemInfo(b);
+  if (D.shopSort === 'location') {
+    const la = A.p ? st.loc(A.p) || '\uffff' : '\uffff\uffff';
+    const lb = B.p ? st.loc(B.p) || '\uffff' : '\uffff\uffff';
+    const c = la.localeCompare(lb, 'es');
+    if (c) return c;
+  }
+  return A.name.localeCompare(B.name, 'es');
+});
 
-function itemRow(it) {
+export function itemRow(it) {
   const inf = itemInfo(it);
   const res = inf.p ? st.inReserve(inf.p) : 0;
-  const sub = [it.qty ? st.fmtQty(it.qty, inf.unit) : null, inf.brand, res > 0 ? `${st.fmtNum(res)} en reserva` : null].filter(Boolean).join(' · ');
+  const syms = st.itemStoreIds(it).map((id) => st.getStore(id).symbol).join('');
+  const sub = [it.qty ? st.fmtQty(it.qty, inf.unit) : null, inf.brand, res > 0 ? `${st.fmtNum(res)} en reserva` : null, !ui.store && syms ? syms : null].filter(Boolean).join(' · ');
   return h('div', { class: 'row item' + (it.done ? ' done' : '') },
     h('button', { class: 'check', 'aria-label': it.done ? 'Desmarcar' : 'Comprado', onclick: () => (it.done ? undone(it.id) : buy(it.id)) }, it.done ? icon('check') : null),
     h('button', { class: 'row-main plain', onclick: () => itemSheet(it.id) },
@@ -44,25 +62,26 @@ function itemLabel(it) {
   }
   return s;
 }
-export function listText(listIds) {
+export function listText(listIds, storeId = '') {
   const blocks = [];
   for (const l of st.lists().filter((x) => listIds.includes(x.id))) {
-    const its = sortItems(shopItems(l.id));
+    const its = sortItems(shopItems(l.id).filter((it) => !storeId || inStore(it, storeId)));
     if (!its.length) continue;
-    const lines = its.map((it) => '- ' + itemLabel(it)).join('\n');
+    const lines = its.map((it) => (D.copyBullet ?? '- ') + itemLabel(it)).join('\n');
     blocks.push(D.copyTitle ? `*${l.name}*\n${lines}` : lines);
   }
-  return blocks.join('\n\n');
+  const store = st.getStore(storeId);
+  return blocks.length && store && D.copyTitle ? `🛒 *${store.name}*\n\n` + blocks.join('\n\n') : blocks.join('\n\n');
 }
-async function copyLists(ids) {
-  const text = listText(ids);
+export async function copyLists(ids, storeId = ui.store) {
+  const text = listText(ids, storeId);
   if (!text) { toast('No hay nada que copiar'); return; }
   toast((await copyText(text)) ? 'Lista copiada. Pégala en WhatsApp' : 'No se pudo copiar');
 }
-async function shareLists(ids) {
-  const text = listText(ids);
+export async function shareLists(ids, storeId = ui.store) {
+  const text = listText(ids, storeId);
   if (!text) { toast('No hay nada que compartir'); return; }
-  try { await navigator.share({ text }); } catch (e) { if (e.name !== 'AbortError') copyLists(ids); }
+  try { await navigator.share({ text }); } catch (e) { if (e.name !== 'AbortError') copyLists(ids, storeId); }
 }
 
 function emptyList(l) {
@@ -89,31 +108,44 @@ function emptyList(l) {
 export function renderShop(m) {
   m.dataset.view = 'shop';
   const ls = st.lists();
+  if (!ui.init) { ui.init = true; ui.list = D.shopList || '__all'; ui.store = D.shopStore || ''; }
   if (ui.list !== '__all' && !ls.some((l) => l.id === ui.list)) ui.list = '__all';
+  const stores = st.stores();
+  if (ui.store && !st.getStore(ui.store)) ui.store = '';
   const chips = h('div', { class: 'chips' },
-    h('button', { class: 'chip' + (ui.list === '__all' ? ' on' : ''), onclick: () => { ui.list = '__all'; renderShop(m); } }, 'Todas', h('small', {}, shopItems().length)),
-    ls.map((l) => h('button', { class: 'chip' + (ui.list === l.id ? ' on' : ''), onclick: () => { ui.list = l.id; renderShop(m); } }, l.name, h('small', {}, shopItems(l.id).length))),
+    stores.length ? select([['', 'Todas las tiendas'], ...stores.map((x) => [x.id, label(x)])], ui.store, {
+      class: 'chip' + (ui.store ? ' on' : ''), onchange: (e) => { ui.store = e.target.value; renderShop(m); },
+    }) : null,
+    h('button', { class: 'chip' + (ui.list === '__all' ? ' on' : ''), onclick: () => { ui.list = '__all'; renderShop(m); } }, 'Todas', h('small', {}, byStore(shopItems()).length)),
+    ls.map((l) => h('button', { class: 'chip' + (ui.list === l.id ? ' on' : ''), onclick: () => { ui.list = l.id; renderShop(m); } }, l.name, h('small', {}, byStore(shopItems(l.id)).length))),
     h('button', { class: 'chip', onclick: newList }, '+ Nueva lista'));
 
   const parts = [chips];
+  const unassignedSection = (its) => {
+    const un = ui.store && D.shopUnassigned !== false ? its.filter(noStore) : [];
+    return un.length ? [h('div', { class: 'section-h' }, h('h3', {}, 'Sin tienda asignada'), h('small', {}, un.length)),
+      h('p', { class: 'hint' }, 'Se pueden comprar en cualquier sitio. Asígnales tienda en su ficha.'),
+      h('div', { class: 'list' }, sortItems(un).map(itemRow))] : [];
+  };
   if (ui.list === '__all') {
-    const n = shopItems().length;
+    const n = byStore(shopItems()).length;
     parts.push(h('div', { class: 'toolbar' },
       h('button', { class: 'btn small', disabled: !n, onclick: () => copyLists(ls.map((l) => l.id)) }, icon('copy'), 'Copiar todo'),
       navigator.share ? h('button', { class: 'btn small', disabled: !n, onclick: () => shareLists(ls.map((l) => l.id)) }, icon('share'), 'Compartir') : null));
     let any = false;
     for (const l of ls) {
-      const its = shopItems(l.id);
+      const its = byStore(shopItems(l.id));
       if (!its.length) continue;
       any = true;
       parts.push(h('div', { class: 'section-h' }, h('h3', {}, l.name), h('small', {}, its.length)),
         h('div', { class: 'list' }, sortItems(its).map(itemRow)));
     }
-    if (!any) parts.push(h('div', { class: 'empty' }, icon('cart'), h('p', {}, 'No hace falta comprar nada.'),
+    if (!any) parts.push(h('div', { class: 'empty' }, icon('cart'), h('p', {}, ui.store ? 'Nada que comprar en esta tienda.' : 'No hace falta comprar nada.'),
       h('p', {}, 'Lo que baje del mínimo aparecerá aquí solo.')));
+    parts.push(...unassignedSection(shopItems()));
   } else {
     const l = S.lists[ui.list];
-    const its = shopItems(l.id);
+    const its = byStore(shopItems(l.id));
     const anyInList = st.alive(S.items).some((it) => it.listId === l.id && !it.dismissed);
     parts.push(h('div', { class: 'toolbar' },
       h('button', { class: 'btn small', disabled: !its.length, onclick: () => copyLists([l.id]) }, icon('copy'), 'Copiar'),
@@ -127,10 +159,11 @@ export function renderShop(m) {
         if (confirm(`¿Borrar la lista «${l.name}»? Lo que tenga pasa a «General».`)) { st.deleteList(l.id); ui.list = '__all'; nav.render(); }
       } }, 'Borrar lista') : null));
     parts.push(its.length ? h('div', { class: 'list' }, sortItems(its).map(itemRow))
-      : h('div', { class: 'empty' }, h('p', {}, 'Lista vacía.')));
+      : h('div', { class: 'empty' }, h('p', {}, ui.store ? 'Nada de esta lista para esta tienda.' : 'Lista vacía.')));
+    parts.push(...unassignedSection(shopItems(l.id)));
 
     const addIn = inp({ placeholder: 'Añadir algo a la lista…', list: 'dl-products', enterkeyhint: 'done' });
-    parts.push(h('form', { class: 'add-form', onsubmit: (e) => { e.preventDefault(); addFreeItem(addIn.value, l.id); addIn.value = ''; } },
+    parts.push(h('form', { class: 'add-form', onsubmit: (e) => { e.preventDefault(); addFreeItem(addIn.value, l.id, ui.store); addIn.value = ''; } },
       addIn, h('button', { class: 'btn primary', 'aria-label': 'Añadir' }, icon('plus'))));
 
     const done = st.alive(S.items).filter((it) => it.listId === l.id && it.done);
@@ -158,7 +191,7 @@ function newList() {
   nav.render();
 }
 
-function addFreeItem(text, listId) {
+export function addFreeItem(text, listId, storeId = '') {
   const name = text.trim();
   if (!name) return;
   const p = st.products().find((x) => st.norm(x.name) === st.norm(name));
@@ -172,7 +205,7 @@ function addFreeItem(text, listId) {
     }
     st.putItem({ id: uid(), productId: p.id, listId, qty: st.needs(p) ? st.suggest(p) : 1 });
   } else {
-    st.putItem({ id: uid(), name, listId, qty: 1 });
+    st.putItem({ id: uid(), name, listId, qty: 1, storeId: storeId || null });
   }
 }
 
@@ -182,6 +215,7 @@ function itemSheet(id) {
   const qIn = numInput(it.qty ? st.fmtNum(it.qty) : '');
   const lSel = select(st.lists().map((l) => [l.id, l.name]), it.listId);
   const nameIn = inf.p ? null : inp({ value: it.name || '' });
+  const storeSel = inf.p ? null : select([['', 'Cualquiera'], ...st.stores().map((x) => [x.id, label(x)])], it.storeId || '');
   const res = inf.p ? st.inReserve(inf.p) : 0;
   const s = openSheet(inf.name, () => [
     it.auto ? h('p', { class: 'muted' }, `Está aquí porque hay ${st.fmtQty(st.atHand(inf.p), inf.unit)} a mano y el mínimo es ${st.fmtNum(inf.p.min)}.`) : null,
@@ -189,12 +223,15 @@ function itemSheet(id) {
       h('button', { class: 'linkbtn', onclick: () => { s.close(); fromReserveSheet(inf.p.id); } }, 'Traer de la reserva')) : null,
     nameIn ? field('Nombre', nameIn) : null,
     h('div', { class: 'grid2' }, field(`Cantidad (${UNITS[inf.unit]})`, qIn), field('Lista', lSel)),
+    storeSel ? field('Tienda', storeSel) : inf.p && st.productStores(inf.p).length
+      ? h('p', { class: 'muted' }, 'Se compra en: ' + st.productStores(inf.p).map(label).join(', ')) : null,
     h('button', { class: 'btn primary block', onclick: () => {
       const x = S.items[id];
       const q = num(qIn.value);
       if (q !== x.qty) { x.qty = q; if (x.auto) x.qtyEdited = true; }
       x.listId = lSel.value;
       if (nameIn) x.name = nameIn.value.trim() || x.name;
+      if (storeSel) x.storeId = storeSel.value || null;
       st.putItem(x);
       s.close();
     } }, 'Guardar'),
@@ -216,7 +253,7 @@ function buy(id) {
       h('button', { class: 'btn primary block', onclick: () => {
         s.close();
         nav.editProduct({
-          preset: { id: uid(), name: inf.name, unit: 'ud', restock: true, alerts: true, lots: [], variants: [], locationId: D.defaultLocationId || null },
+          preset: nav.newProductDraft(inf.name),
           onSaved: (pid) => {
             const x = S.items[id];
             x.productId = pid; x.done = true;
@@ -230,10 +267,26 @@ function buy(id) {
     return;
   }
   const p = inf.p;
+  if (D.shopAskOnBuy === false) {
+    // Modo rápido: suma la cantidad de la lista con la marca favorita, sin preguntar.
+    const beforeLots = st.clone(p.lots || []);
+    const beforeItem = st.clone(it);
+    const q = +it.qty || 1;
+    st.addStock(S.products[p.id], { variantId: st.fav(p)?.id || null, qty: q, locationId: nav.stockLocFor(p) || null });
+    const x = S.items[id];
+    if (x && !x.del && !x.auto) { x.done = true; st.putItem(x); }
+    toast(`${p.name}: +${st.fmtQty(q, p.unit)} en el inventario`, { action: 'Deshacer', ms: 6000, onAction: () => {
+      const pp = S.products[p.id];
+      pp.lots = beforeLots;
+      st.putProduct(pp);
+      if (!beforeItem.auto) st.putItem(beforeItem);
+    } });
+    return;
+  }
   const vSel = select(nav.variantOptions(p), st.fav(p)?.id ?? '');
   const qIn = numInput(st.fmtNum(it.qty || 1));
   const eIn = inp({ type: 'date' });
-  const where = locSelect(p.locationId || D.defaultLocationId || '');
+  const where = locSelect(nav.stockLocFor(p));
   const s = openSheet('Comprado: ' + p.name, () => [
     field('Marca', vSel),
     h('div', { class: 'grid2' }, field(`Cantidad (${UNITS[p.unit || 'ud']})`, qIn), field('Caducidad (opcional)', eIn)),

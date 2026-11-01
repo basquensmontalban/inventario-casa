@@ -3,8 +3,8 @@ import { kvGet, kvSet } from './db.js';
 
 export const GENERAL = 'general';
 export const UNITS = { ud: 'ud.', kg: 'kg', g: 'g', l: 'l', ml: 'ml' };
-export const SCHEMA = 2;
-const COLLECTIONS = ['products', 'lists', 'items', 'locations'];
+export const SCHEMA = 4;
+const COLLECTIONS = ['products', 'lists', 'items', 'locations', 'tags', 'stores', 'recipes', 'recipeGroups'];
 
 export const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 const now = () => Date.now();
@@ -29,6 +29,10 @@ function emptyState() {
     lists: { [GENERAL]: { id: GENERAL, name: 'General', u: 1 } },
     items: {},
     locations: {},
+    tags: {},
+    stores: {},
+    recipes: {},
+    recipeGroups: {},
     settings: { ...DEFAULT_SETTINGS },
     backupInfo: { last: 0, by: '', u: 0 },
   };
@@ -65,20 +69,57 @@ function ensure() {
 
 // Convierte datos de la versión anterior (habitación/mueble/estante en texto) y repara referencias.
 // Es determinista: los dos móviles llegan al mismo resultado sin duplicar ubicaciones.
+// Lo que se crea aquí lleva fecha 1 (muy antigua) para que cualquier cambio hecho en el otro móvil gane.
 function normalize() {
-  const t = now();
+  if (!Object.keys(S.tags).length) seedTags();
+  if (!Object.keys(S.recipeGroups).length) seedRecipeGroups();
   for (const p of Object.values(S.products)) {
     if (p.del) continue;
     if ('room' in p || 'furniture' in p || 'shelf' in p) {
       const names = [p.room, p.furniture, p.shelf].map((x) => String(x || '').trim()).filter(Boolean);
-      if (!p.locationId) p.locationId = names.length ? ensurePath(names, t) : null;
+      if (!p.locationId) p.locationId = names.length ? ensurePath(names, 1) : null;
       delete p.room; delete p.furniture; delete p.shelf;
+    }
+    if ('category' in p) {
+      const c = String(p.category || '').trim();
+      if (c) p.tags = [...new Set([...(p.tags || []), ensureTag(c.charAt(0).toUpperCase() + c.slice(1))])];
+      delete p.category;
     }
     if (p.locationId && !locAlive(p.locationId)) p.locationId = null;
     for (const l of p.lots || []) {
       if (l.locationId === undefined || (l.locationId && !locAlive(l.locationId))) l.locationId = p.locationId || null;
     }
+    if (p.tags) p.tags = p.tags.filter((id) => getTag(id));
+    if (p.stores) p.stores = p.stores.filter((id) => getStore(id));
   }
+  for (const it of Object.values(S.items)) if (it.storeId && !getStore(it.storeId)) it.storeId = null;
+  for (const r of Object.values(S.recipes)) {
+    if (r.del) continue;
+    for (const ing of r.ingredients || []) if (ing.productId && !(S.products[ing.productId] && !S.products[ing.productId].del)) ing.productId = null;
+  }
+}
+
+const RG_SEEDS = [
+  ['rg-momento', 'Momento', true, ['Desayuno', 'Comida', 'Cena', 'Merienda', 'Picoteo']],
+  ['rg-tipo', 'Tipo', false, ['Ligero', 'Pesado']],
+];
+function seedRecipeGroups() {
+  RG_SEEDS.forEach(([id, name, multi, opts], i) => {
+    S.recipeGroups[id] = { id, name, multi, order: i, options: opts.map((n) => ({ id: id + '-' + hash(norm(n)), name: n })), u: 1 };
+  });
+}
+
+const TAG_SEEDS = [['Verdura', '🥬'], ['Fruta', '🍎'], ['Conservas', '🥫']];
+function seedTags() {
+  TAG_SEEDS.forEach(([name, symbol], i) => ensureTag(name, symbol, i));
+}
+function ensureTag(name, symbol = '🏷️', order) {
+  const found = alive(S.tags).find((t) => norm(t.name) === norm(name));
+  if (found) return found.id;
+  const id = 'tag-' + hash(norm(name));
+  if (S.tags[id]?.del) return null;
+  S.tags[id] = { id, name, symbol, u: 1, ...(order !== undefined ? { order } : {}) };
+  return id;
 }
 
 function hash(s) {
@@ -231,6 +272,44 @@ export function deleteLoc(id, targetId) {
 }
 export const productInLoc = (p, set) =>
   set.has(p.locationId) || (p.lots || []).some((l) => +l.qty > 0 && set.has(l.locationId));
+
+// ── Etiquetas y tiendas (mismo formato: nombre + símbolo) ──
+export const getTag = (id) => (id && S.tags[id] && !S.tags[id].del ? S.tags[id] : null);
+export const getStore = (id) => (id && S.stores[id] && !S.stores[id].del ? S.stores[id] : null);
+export const tags = () => alive(S.tags).sort(byOrder);
+export const stores = () => alive(S.stores).sort(byOrder);
+export const productTags = (p) => (p.tags || []).map(getTag).filter(Boolean);
+export const productStores = (p) => (p.stores || []).map(getStore).filter(Boolean);
+export const catalog = (kind) => (kind === 'tags' ? tags() : stores());
+export function putCatalog(kind, rec) {
+  rec.u = now();
+  S[kind][rec.id] = rec;
+  commit();
+}
+export function deleteCatalog(kind, id) {
+  const t = now();
+  const field = kind === 'tags' ? 'tags' : 'stores';
+  for (const p of alive(S.products)) if ((p[field] || []).includes(id)) { p[field] = p[field].filter((x) => x !== id); p.u = t; }
+  if (kind === 'stores') for (const it of alive(S.items)) if (it.storeId === id) { it.storeId = null; it.u = t; }
+  S[kind][id] = { id, del: true, u: t };
+  commit();
+}
+export function moveCatalogOrder(kind, id, dir) {
+  const arr = catalog(kind);
+  const i = arr.findIndex((x) => x.id === id);
+  const j = i + dir;
+  if (i < 0 || j < 0 || j >= arr.length) return;
+  [arr[i], arr[j]] = [arr[j], arr[i]];
+  const t = now();
+  arr.forEach((x, k) => { if (x.order !== k) { x.order = k; x.u = t; } });
+  commit();
+}
+// Tiendas donde se compra un elemento de la lista (las del artículo, o la suya si es suelto).
+export const itemStoreIds = (it) => {
+  const p = it.productId && S.products[it.productId] && !S.products[it.productId].del ? S.products[it.productId] : null;
+  return p ? (p.stores || []).filter((id) => getStore(id)) : it.storeId && getStore(it.storeId) ? [it.storeId] : [];
+};
+export const onList = (p) => alive(S.items).some((it) => it.productId === p.id && !it.done && !it.dismissed);
 
 // ── Existencias ────────────────────────────────────────────
 const sum = (lots) => round(lots.reduce((s, l) => s + (+l.qty || 0), 0));
@@ -428,6 +507,8 @@ export function merge(remote) {
     S.backupInfo = remote.backupInfo;
     changed = true;
   }
+  // Conserva datos de versiones más nuevas de la app que esta todavía no conoce.
+  for (const [k, v] of Object.entries(remote)) if (!(k in S)) S[k] = v;
   ensure();
   return changed;
 }
@@ -493,4 +574,60 @@ export function desiredAlerts() {
     }
   }
   return out;
+}
+
+// ── Recetas ────────────────────────────────────────────────
+export const recipes = () => alive(S.recipes).sort((a, b) => a.name.localeCompare(b.name, 'es'));
+export const recipeGroups = () => alive(S.recipeGroups).sort(byOrder);
+export function putRecipe(r) {
+  r.u = now();
+  S.recipes[r.id] = r;
+  commit();
+}
+export function deleteRecipe(id) {
+  S.recipes[id] = { id, del: true, u: now() };
+  commit();
+}
+export function putGroup(gr) {
+  gr.u = now();
+  S.recipeGroups[gr.id] = gr;
+  commit();
+}
+export function deleteGroup(id) {
+  const t = now();
+  for (const r of alive(S.recipes)) if (r.cats && r.cats[id]) { delete r.cats[id]; r.u = t; }
+  S.recipeGroups[id] = { id, del: true, u: t };
+  commit();
+}
+export const recipeMinutes = (r) => (+r.prepMin || 0) + (+r.cookMin || 0);
+
+// Conversión entre unidades compatibles (g↔kg, ml↔l, ud). null si no se pueden comparar.
+const UNIT_BASE = { g: ['m', 1], kg: ['m', 1000], ml: ['v', 1], l: ['v', 1000], ud: ['u', 1], '': ['u', 1] };
+export function convertQty(qty, from, to) {
+  const a = UNIT_BASE[from ?? ''];
+  const b = UNIT_BASE[to || 'ud'];
+  if (!a || !b || a[0] !== b[0]) return null;
+  return round((+qty * a[1]) / b[1]);
+}
+
+// Estado de un ingrediente según lo que hay A MANO (la reserva no cuenta).
+export function ingredientState(ing, factor = 1) {
+  if (ing.basic) return { state: 'basic' };
+  const p = ing.productId && S.products[ing.productId] && !S.products[ing.productId].del ? S.products[ing.productId] : null;
+  const opt = !!ing.optional;
+  if (!p) return { state: 'missing', unlinked: true, optional: opt };
+  const have = atHand(p);
+  const need = ing.qty ? convertQty(+ing.qty * factor, ing.unit || '', p.unit || 'ud') : null;
+  if (have <= 0) return { state: 'missing', p, have, need, optional: opt, reserve: inReserve(p) };
+  if (need !== null && have < need) return { state: 'short', p, have, need, optional: opt, reserve: inReserve(p) };
+  return { state: 'ok', p, have, need, optional: opt };
+}
+// ok = lo tienes todo · few = faltan pocos (hasta orangeMax) · many = faltan más (sin contar opcionales ni básicos)
+export function recipeStatus(r, orangeMax = 2) {
+  const missing = (r.ingredients || []).filter((ing) => {
+    const s = ingredientState(ing);
+    return (s.state === 'missing' || s.state === 'short') && !s.optional;
+  });
+  const n = missing.length;
+  return { n, missing, level: n === 0 ? 'ok' : n <= orangeMax ? 'few' : 'many' };
 }

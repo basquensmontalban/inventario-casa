@@ -85,6 +85,49 @@ En **Ajustes › Ubicaciones** creas estancias, muebles y estantes (hasta 3 nive
 Las existencias de un artículo pueden estar repartidas: lo que está en reserva no cuenta como «a mano» ni para el mínimo de compra.
 Desde la ficha de un artículo puedes mover existencias de un sitio a otro o «traer de la reserva».
 
+## Etiquetas y tiendas
+
+- **Etiquetas** (Ajustes › Etiquetas y tiendas): cada una con su símbolo. Un artículo puede tener varias y se filtra por ellas en el inventario. Las antiguas «categorías» se convirtieron en etiquetas.
+- **Tiendas**: en cada artículo indicas dónde se compra. Se puede filtrar por tienda en el inventario y en la compra (lo que no tiene tienda sale aparte).
+- **Pestaña Tiendas**: para cada tienda, lo que hay que comprar allí, sugerencias («quizás también»: lo que se ha acabado, está por debajo de lo que soléis tener o caduca pronto) y todo lo que soléis comprar allí.
+
+## Recetas
+
+- Cada receta tiene foto, tiempos de preparación y cocción, raciones (se pueden escalar), ingredientes, pasos, notas y fuente.
+- Los ingredientes se **vinculan** con artículos del inventario. Así la receta sale en **verde** si tienes todo a mano, en **naranja** si faltan 1 o 2 y en **rojo** si faltan más. La reserva no cuenta; los ingredientes **básicos** (sal, agua…) y los **opcionales** no cuentan para el color.
+- **A la lista**: añade solo lo que falta o todos los ingredientes (puedes desmarcar).
+- **La he cocinado**: descuenta del inventario lo usado.
+- **Filtros**: disponibilidad, tiempo, ingrediente, «Momento» (desayuno, comida, cena…), «Tipo» (ligero/pesado) y los que crees en «⚙ Filtros de recetas».
+
+### Formato de receta para importar
+
+Pídele a Claude «una receta para importar en la app del inventario». En la app: Recetas › Importar receta › elegir el archivo o pegar el texto.
+
+```json
+{
+  "app": "inventario-casa", "kind": "recipe", "version": 1,
+  "recipe": {
+    "name": "Garbanzos con espinacas", "servings": 4, "prepMinutes": 10, "cookMinutes": 20,
+    "meal": ["Comida", "Cena"], "weight": "Ligero", "extra": { "Cocina": ["Andaluza"] },
+    "ingredients": [
+      { "name": "Garbanzos cocidos", "qty": 800, "unit": "g" },
+      { "name": "Comino molido", "qty": 1, "unit": "cdta", "optional": true },
+      { "name": "Sal", "basic": true }
+    ],
+    "steps": ["Paso 1…", "Paso 2…"], "notes": "", "source": ""
+  }
+}
+```
+
+Unidades: ud, g, kg, ml, l, cda (cucharada), cdta (cucharadita), taza, vaso, pizca, diente, lata, manojo, rodaja. Para varias recetas a la vez: `"recipes": [ … ]`.
+
+## Ajustes
+
+Ajustes está organizado por secciones:
+
+- **Este móvil** (cada móvil tiene los suyos y se guardan en Drive): General (pestañas que se ven, pestaña al abrir, tema claro/oscuro, tamaño de letra, vibración), Inventario (filtros que se ven, orden, mostrar agotados, ubicación preferida, valores de los artículos nuevos), Compra (lista y tienda al abrir, orden, preguntar o no al marcar comprado, formato al copiar), Recetas (cuándo sale naranja, orden, filtros que se ven, raciones y lista por defecto) y Tiendas (tienda al abrir, sugerencias). En «Copia de esta configuración» se recupera en un móvil nuevo, se guarda en un archivo o se vuelve a los valores de fábrica.
+- **Común a los dos móviles**: ubicaciones, etiquetas, lista de tiendas, listas de la compra, filtros de recetas, avisos y copias de seguridad.
+
 ## Copias de seguridad
 
 - **Automáticas** en Drive › Inventario Casa › Copias de seguridad (cada día, cada 3 días o cada semana, en Ajustes).

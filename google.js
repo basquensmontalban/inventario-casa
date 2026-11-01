@@ -148,7 +148,7 @@ export async function ensureFolder() {
 }
 
 async function uploadPhotos(folder) {
-  for (const p of st.alive(st.S.products)) {
+  for (const p of [...st.alive(st.S.products), ...st.alive(st.S.recipes)]) {
     if (!p.photo || p.photo.driveId) continue;
     const blob = await photoGet(p.photo.id);
     if (!blob) continue;

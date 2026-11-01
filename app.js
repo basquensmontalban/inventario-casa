@@ -6,15 +6,18 @@ import { scanBarcode } from './scanner.js';
 import { photoSet, photoDel } from './db.js';
 import { D, loadDevice, onDeviceChange } from './device.js';
 import {
-  $, h, icon, badge, hue, num, field, inp, toggle, select, numInput, indent, toast, openSheet, sheets, closeAll, nav,
+  $, h, icon, badge, hue, num, field, inp, toggle, select, numInput, indent, toast, openSheet, sheets, closeAll, nav, resizeImage,
 } from './ui.js';
 import { locSelect, openLocations, moveSheet, fromReserveSheet } from './locations.js';
 import { renderShop, shopItems } from './shop.js';
 import { renderSettings } from './settings.js';
+import { renderStores } from './stores.js';
+import { renderRecipes, editRecipe, openRecipe } from './recipes.js';
+import { catalogPicker, openCatalog, label } from './catalog.js';
 
 // ── Estado de la interfaz ──────────────────────────────────
 let tab = 'inv';
-const ui = { q: '', filter: 'all', loc: '' };
+const ui = { q: '', filter: 'all', loc: '', tag: '', store: '' };
 
 function setTab(t) {
   tab = t;
@@ -24,12 +27,14 @@ function setTab(t) {
 }
 
 function render() {
-  $('#title').textContent = { inv: 'Inventario', shop: 'Compra', set: 'Ajustes' }[tab];
+  $('#title').textContent = { inv: 'Inventario', shop: 'Compra', recipes: 'Recetas', stores: 'Tiendas', set: 'Ajustes' }[tab];
   document.querySelectorAll('.tab').forEach((b) => b.classList.toggle('on', b.dataset.tab === tab));
-  $('#fabAdd').hidden = tab !== 'inv';
+  $('#fabAdd').hidden = tab !== 'inv' && tab !== 'recipes';
   const m = $('#main');
   if (tab === 'inv') renderInv(m);
   else if (tab === 'shop') renderShop(m);
+  else if (tab === 'stores') renderStores(m);
+  else if (tab === 'recipes') renderRecipes(m);
   else renderSettings(m);
   updateCounts();
   fillDatalists();
@@ -56,14 +61,14 @@ function fillDatalists() {
     const uniq = [...new Set(vals.filter(Boolean))].sort((a, b) => a.localeCompare(b, 'es'));
     dl.replaceChildren(...uniq.map((v) => h('option', { value: v })));
   };
-  fill('dl-categories', ps.map((p) => p.category));
   fill('dl-products', ps.map((p) => p.name));
 }
 
 // ── Inventario ─────────────────────────────────────────────
 function matches(p, q) {
   if (!q) return true;
-  const hay = st.norm([p.name, p.category, st.loc(p), p.notes, ...(p.variants || []).flatMap((v) => [v.brand, v.barcode])]
+  const hay = st.norm([p.name, st.loc(p), p.notes, ...st.productTags(p).map((t) => t.name), ...st.productStores(p).map((x) => x.name),
+    ...(p.variants || []).flatMap((v) => [v.brand, v.barcode])]
     .filter(Boolean).join(' '));
   return q.split(/\s+/).every((w) => hay.includes(w));
 }
@@ -94,10 +99,12 @@ function renderInvList() {
     critical: ['Críticos', (p) => !!p.critical],
   };
   const tree = st.locTree();
+  const F = D.invFilters;
   if (ui.loc && !st.getLoc(ui.loc)) ui.loc = '';
+  if (ui.filter !== 'all' && F[ui.filter] === false) ui.filter = 'all';
   $('#invChips').replaceChildren(...[
-    tree.length
-      ? select([['', 'Todas las ubicaciones'], ...tree.map(({ loc, depth }) => [loc.id, indent(depth) + loc.name]), ['__manage', '⚙ Gestionar ubicaciones…']], ui.loc, {
+    !F.loc ? null : tree.length
+      ? select([['', 'Todas las ubicaciones'], ...tree.map(({ loc }) => [loc.id, st.locName(loc.id)]), ['__manage', '⚙ Gestionar ubicaciones…']], ui.loc, {
           class: 'chip' + (ui.loc ? ' on' : ''),
           onchange: (e) => {
             if (e.target.value === '__manage') { e.target.value = ui.loc; openLocations(); return; }
@@ -106,7 +113,10 @@ function renderInvList() {
           },
         })
       : h('button', { class: 'chip', onclick: openLocations }, '+ Ubicaciones'),
+    F.tag ? catSelect('tags', 'Todas las etiquetas', ui.tag, (v) => { ui.tag = v; }) : null,
+    F.store ? catSelect('stores', 'Todas las tiendas', ui.store, (v) => { ui.store = v; }) : null,
     ...Object.entries(filters).map(([k, [label, fn]]) => {
+      if (k !== 'all' && F[k] === false) return null;
       const n = all.filter(fn).length;
       if (k !== 'all' && k !== ui.filter && !n) return null;
       return h('button', { class: 'chip' + (ui.filter === k ? ' on' : ''), onclick: () => { ui.filter = k; renderInvList(); } },
@@ -114,7 +124,16 @@ function renderInvList() {
     }),
   ].filter(Boolean));
   const set = ui.loc ? st.locSubtree(ui.loc) : null;
-  const list = all.filter((p) => filters[ui.filter][1](p) && (!set || st.productInLoc(p, set)) && matches(p, q));
+  if (ui.tag && !st.getTag(ui.tag)) ui.tag = '';
+  if (ui.store && !st.getStore(ui.store)) ui.store = '';
+  if (!F.loc) ui.loc = '';
+  if (!F.tag) ui.tag = '';
+  if (!F.store) ui.store = '';
+  const showEmpty = D.invShowEmpty || ['empty', 'low'].includes(ui.filter) || q;
+  const list = all.filter((p) => filters[ui.filter][1](p) && (!set || st.productInLoc(p, set)) && matches(p, q)
+    && (!ui.tag || (p.tags || []).includes(ui.tag)) && (!ui.store || (p.stores || []).includes(ui.store))
+    && (showEmpty || st.total(p) > 0));
+  sortProducts(list);
   const box = $('#invList');
   if (!all.length) {
     box.replaceChildren(h('div', { class: 'empty' }, icon('box'), h('p', {}, 'Todavía no hay nada.'),
@@ -126,8 +145,41 @@ function renderInvList() {
   }
 }
 
+// Desplegable de etiquetas o tiendas para los filtros (con acceso al gestor).
+function catSelect(kind, all, value, set) {
+  const arr = st.catalog(kind);
+  if (!arr.length) return null;
+  return select([['', all], ...arr.map((r) => [r.id, label(r)]), ['__manage', kind === 'tags' ? '⚙ Gestionar etiquetas…' : '⚙ Gestionar tiendas…']], value, {
+    class: 'chip' + (value ? ' on' : ''),
+    onchange: (e) => {
+      if (e.target.value === '__manage') { e.target.value = value; openCatalog(kind); return; }
+      set(e.target.value);
+      renderInvList();
+    },
+  });
+}
+
+function firstExpiry(p) {
+  return (p.lots || []).filter((l) => +l.qty > 0 && l.expiry).map((l) => l.expiry).sort()[0] || '9999';
+}
+function sortProducts(list) {
+  const by = {
+    location: (a, b) => (st.loc(a) || '\uffff').localeCompare(st.loc(b) || '\uffff', 'es') || a.name.localeCompare(b.name, 'es'),
+    expiry: (a, b) => firstExpiry(a).localeCompare(firstExpiry(b)) || a.name.localeCompare(b.name, 'es'),
+    qty: (a, b) => st.total(a) - st.total(b) || a.name.localeCompare(b.name, 'es'),
+  }[D.invSort];
+  if (by) list.sort(by);
+}
+
+// Ubicación propuesta al añadir existencias (según el ajuste del móvil).
+function stockLocFor(p) {
+  return D.stockLoc === 'device' ? D.defaultLocationId || p.locationId || '' : p.locationId || D.defaultLocationId || '';
+}
+
 function thumbFor(p, cls = 'thumb') {
-  const t = h('div', { class: cls, style: `--hue:${hue(p.category || p.name)}` }, (p.name || '?').trim().charAt(0).toUpperCase());
+  const tag = st.productTags(p)[0];
+  const t = h('div', { class: cls + (tag && !p.photo ? ' emoji' : ''), style: `--hue:${hue(tag?.name || p.name)}` },
+    tag && !p.photo ? tag.symbol : (p.name || '?').trim().charAt(0).toUpperCase());
   if (p.photo) g.photoURL(p.photo).then((u) => { if (u) { t.textContent = ''; t.style.backgroundImage = `url("${u}")`; } });
   return t;
 }
@@ -136,11 +188,12 @@ function productRow(p) {
   const tot = st.total(p);
   const res = st.inReserve(p);
   const ex = st.productExpiry(p);
-  const sub = [st.loc(p) || p.category || 'Sin ubicación', res > 0 ? `${st.fmtNum(res)} en reserva` : null].filter(Boolean).join(' · ');
+  const sub = [st.loc(p) || 'Sin ubicación', res > 0 ? `${st.fmtNum(res)} en reserva` : null].filter(Boolean).join(' · ');
+  const syms = st.productTags(p).slice(p.photo ? 0 : 1).map((t) => t.symbol).join('');
   return h('button', { class: 'row', onclick: () => openProduct(p.id) },
     thumbFor(p),
     h('div', { class: 'row-main' },
-      h('div', { class: 'row-title' }, p.name),
+      h('div', { class: 'row-title' }, p.name, syms ? h('span', { class: 'syms' }, syms) : null),
       h('div', { class: 'row-sub' }, sub),
       (ex || st.needs(p) || p.critical) ? h('div', { class: 'badges' },
         ex === 'expired' ? badge('Caducado', 'bad') : ex === 'soon' ? badge('Caduca pronto', 'warn') : null,
@@ -163,8 +216,9 @@ function openProduct(id) {
       g.photoURL(p.photo).then((u) => { if (u) img.src = u; else img.remove(); });
       out.push(img);
     }
-    out.push(h('div', { class: 'meta-line' }, p.category ? badge(p.category) : null,
+    out.push(h('div', { class: 'meta-line' }, st.productTags(p).map((t) => badge(label(t))),
       h('span', {}, st.loc(p) ? '📍 ' + st.loc(p) : 'Sin ubicación habitual')));
+    if (st.productStores(p).length) out.push(h('div', { class: 'meta-line', style: 'margin-top:6px' }, 'Se compra en: ', st.productStores(p).map((x) => badge(label(x), 'ok'))));
     out.push(h('div', { class: 'stock' },
       h('div', {}, h('b', { class: 'big' }, st.fmtNum(tot)), ' ', UNITS[p.unit || 'ud']),
       h('div', { class: 'muted' },
@@ -277,7 +331,7 @@ function addStockSheet(id, { variantId, qty = 1, onDone } = {}) {
   const vSel = select(variantOptions(p), variantId ?? st.fav(p)?.id ?? '');
   const qIn = numInput(st.fmtNum(qty));
   const eIn = inp({ type: 'date' });
-  const where = locSelect(p.locationId || D.defaultLocationId || '');
+  const where = locSelect(stockLocFor(p));
   const s = openSheet('Añadir ' + p.name, () => [
     field('Marca', vSel),
     h('div', { class: 'grid2' },
@@ -317,10 +371,17 @@ function addToListSheet(id) {
 }
 
 // ── Editor de artículo ─────────────────────────────────────
+// Artículo nuevo con los valores por defecto de este móvil.
+function newProductDraft(name = '') {
+  return {
+    id: uid(), name, unit: D.newUnit || 'ud', variants: [], lots: [], restock: D.newRestock !== false, alerts: D.newAlerts !== false,
+    locationId: D.defaultLocationId || null, listId: D.newListId && S.lists[D.newListId] && !S.lists[D.newListId].del ? D.newListId : null,
+  };
+}
 function editProduct({ id = null, preset = null, onSaved, focusBrand = false } = {}) {
   const isNew = !id || !S.products[id];
   const p = preset ? st.clone(preset) : isNew
-    ? { id: uid(), name: '', unit: 'ud', variants: [], lots: [], restock: true, alerts: true, locationId: D.defaultLocationId || null }
+    ? newProductDraft()
     : st.clone(S.products[id]);
   p.variants = p.variants || [];
   p.lots = p.lots || [];
@@ -329,7 +390,8 @@ function editProduct({ id = null, preset = null, onSaved, focusBrand = false } =
   let removePhoto = false;
 
   const name = inp({ value: p.name || '', placeholder: 'p. ej. Garbanzos cocidos', autocapitalize: 'sentences' });
-  const category = inp({ value: p.category || '', list: 'dl-categories', placeholder: 'Alimentación, limpieza…' });
+  const tagPick = catalogPicker('tags', p.tags || []);
+  const storePick = catalogPicker('stores', p.stores || []);
   const where = locSelect(p.locationId || '');
   const unit = select(Object.entries({ ud: 'Unidades', kg: 'Kilos', g: 'Gramos', l: 'Litros', ml: 'Mililitros' }), p.unit || 'ud');
   const min = numInput(p.min ?? '', { placeholder: '0' });
@@ -407,7 +469,7 @@ function editProduct({ id = null, preset = null, onSaved, focusBrand = false } =
       }
     }
     Object.assign(p, {
-      name: nm, category: category.value.trim(), locationId: newLoc,
+      name: nm, tags: tagPick.value, stores: storePick.value, locationId: newLoc,
       unit: unit.value, min: num(min.value) ?? 0, target: num(target.value), restock: restock.cb.checked, listId: listSel.value || null,
       alerts: alerts.cb.checked, critical: critical.cb.checked, expiryDays: num(expiryDays.value), notes: notes.value.trim(), variants: vars,
     });
@@ -430,7 +492,7 @@ function editProduct({ id = null, preset = null, onSaved, focusBrand = false } =
         h('button', { class: 'btn small', onclick: (e) => { e.preventDefault(); fileIn.click(); } }, icon('camera'), 'Foto'), photoDelBtn),
       fileIn),
     field('Nombre', name),
-    field('Categoría', category),
+    h('div', { class: 'field' }, h('span', { class: 'lbl' }, 'Etiquetas (opcional)'), tagPick),
     field('Ubicación habitual', where, 'Dónde se guarda normalmente. Las existencias pueden estar repartidas.'),
 
     h('fieldset', {}, h('legend', {}, 'Marcas y códigos de barras'),
@@ -449,6 +511,7 @@ function editProduct({ id = null, preset = null, onSaved, focusBrand = false } =
         field('Mínimo a mano', min, 'Avisa si hay menos (sin contar la reserva)'),
         field('Reponer hasta', target, 'Cantidad que quieres tener')),
       restock,
+      h('div', { class: 'field' }, h('span', { class: 'lbl' }, 'Dónde se compra'), storePick),
       field('Lista habitual', listSel, 'Dónde aparece cuando hay que reponerlo')),
 
     h('fieldset', {}, h('legend', {}, 'Avisos'),
@@ -466,22 +529,6 @@ function editProduct({ id = null, preset = null, onSaved, focusBrand = false } =
     } }, 'Borrar artículo') : null,
   ]);
   if (isNew && !name.value) setTimeout(() => name.focus(), 300);
-}
-
-async function resizeImage(file, max = 900) {
-  let src, w, hgt;
-  try {
-    src = await createImageBitmap(file);
-    w = src.width; hgt = src.height;
-  } catch {
-    src = await new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = rej; i.src = URL.createObjectURL(file); });
-    w = src.naturalWidth; hgt = src.naturalHeight;
-  }
-  const k = Math.min(1, max / Math.max(w, hgt));
-  const c = document.createElement('canvas');
-  c.width = Math.round(w * k); c.height = Math.round(hgt * k);
-  c.getContext('2d').drawImage(src, 0, 0, c.width, c.height);
-  return new Promise((r) => c.toBlob(r, 'image/jpeg', 0.78));
 }
 
 // ── Escanear ───────────────────────────────────────────────
@@ -518,8 +565,7 @@ function unknownCode(code) {
     h('button', { class: 'btn primary block', onclick: () => {
       s.close();
       editProduct({
-        preset: { id: uid(), name: '', unit: 'ud', restock: true, alerts: true, lots: [], locationId: D.defaultLocationId || null,
-          variants: [{ id: uid(), brand: '', barcode: code, fav: true }] },
+        preset: { ...newProductDraft(), variants: [{ id: uid(), brand: '', barcode: code, fav: true }] },
         onSaved: (id) => addStockSheet(id),
       });
     } }, icon('plus'), 'Crear artículo nuevo'),
@@ -580,26 +626,44 @@ function maybeSilentLogin() {
 }
 
 // ── Arranque ───────────────────────────────────────────────
-Object.assign(nav, { render, rerender, setTab, openProduct, editProduct, addStockSheet, variantOptions, scheduleSync });
+// Pestañas visibles, tema y tamaño de letra de este móvil.
+function applyChrome() {
+  const vis = { inv: true, shop: D.tabs.shop !== false, recipes: D.tabs.recipes !== false, stores: D.tabs.stores !== false, set: true };
+  document.querySelectorAll('.tab').forEach((b) => { b.hidden = !vis[b.dataset.tab]; });
+  if (!vis[tab]) tab = 'inv';
+  const root = document.documentElement;
+  if (D.theme === 'light' || D.theme === 'dark') root.dataset.theme = D.theme; else delete root.dataset.theme;
+  const dark = D.theme === 'dark' || (D.theme !== 'light' && matchMedia('(prefers-color-scheme: dark)').matches);
+  document.querySelector('meta[name=theme-color]').content = dark ? '#171614' : '#2f7d5b';
+  document.body.style.zoom = String(+D.fontScale || 1);
+}
+
+Object.assign(nav, { render, rerender, setTab, openProduct, openRecipe, newProductDraft, stockLocFor, applyChrome, editProduct, addStockSheet, variantOptions, scheduleSync });
 
 async function start() {
   const res = g.handleRedirect();
   await st.load();
   await loadDevice();
-  tab = D.startTab === 'shop' ? 'shop' : 'inv';
+  tab = ['shop', 'stores', 'recipes'].includes(D.startTab) && D.tabs[D.startTab] !== false ? D.startTab : 'inv';
 
   $('#btnSettings').append(icon('gear'));
   $('#btnSettings').onclick = () => setTab('set');
   $('#fabAdd').append(icon('plus'), 'Nuevo');
-  $('#fabAdd').onclick = () => editProduct();
+  $('#fabAdd').onclick = () => (tab === 'recipes' ? editRecipe() : editProduct());
   $('#btnScan').append(icon('scan'));
   $('#btnScan').onclick = () => { closeAll(); scanFlow(); };
   const invTab = $('.tab[data-tab="inv"]');
   invTab.append(icon('box'), 'Inventario');
   const shopTab = $('.tab[data-tab="shop"]');
   shopTab.append(icon('cart'), 'Compra', h('span', { class: 'count', hidden: true }));
+  const recTab = $('.tab[data-tab="recipes"]');
+  recTab.append(icon('book'), 'Recetas');
+  recTab.onclick = () => setTab('recipes');
+  const storesTab = $('.tab[data-tab="stores"]');
+  storesTab.append(icon('store'), 'Tiendas');
   invTab.onclick = () => setTab('inv');
   shopTab.onclick = () => setTab('shop');
+  storesTab.onclick = () => setTab('stores');
   $('#syncPill').onclick = () => {
     if (g.sync.status === 'nocfg') setTab('set');
     else if (g.sync.status === 'auth') g.login();
@@ -607,7 +671,8 @@ async function start() {
   };
 
   st.onChange(({ local }) => { rerender(); if (local) scheduleSync(); });
-  onDeviceChange(() => scheduleSync());
+  onDeviceChange(() => { applyChrome(); rerender(); scheduleSync(); });
+  applyChrome();
   g.onStatus(renderPill);
   render();
   renderPill();

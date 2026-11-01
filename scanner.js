@@ -1,4 +1,6 @@
 // Lector de códigos de barras con la cámara (html5-qrcode, se guarda para usarlo sin conexión).
+import { D } from './device.js';
+
 const LIB = 'https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js';
 let libP = null;
 
@@ -42,7 +44,7 @@ export function scanBarcode(title = 'Escanea el código de barras') {
       try { if (scanner?.isScanning) await scanner.stop(); } catch {}
       try { scanner?.clear(); } catch {}
       wrap.remove();
-      if (value) navigator.vibrate?.(60);
+      if (value && D?.vibrate !== false) navigator.vibrate?.(60);
       resolve(value || null);
     }
 

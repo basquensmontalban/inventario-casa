@@ -36,6 +36,9 @@ const ICONS = {
   copy: SVG('<rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>'),
   share: SVG('<circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="M8.6 13.5l6.8 4M15.4 6.5l-6.8 4"/>'),
   pin: SVG('<path d="M12 21s-7-6.1-7-11a7 7 0 0 1 14 0c0 4.9-7 11-7 11z"/><circle cx="12" cy="10" r="2.5"/>'),
+  store: SVG('<path d="M3 9l1.5-5h15L21 9"/><path d="M3 9h18v2a3 3 0 0 1-6 0 3 3 0 0 1-6 0 3 3 0 0 1-6 0z"/><path d="M5 13v8h14v-8"/><path d="M10 21v-5h4v5"/>'),
+  download: SVG('<path d="M12 3v12M7 10l5 5 5-5"/><path d="M5 21h14"/>'),
+  book: SVG('<path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20V3H6.5A2.5 2.5 0 0 0 4 5.5z"/><path d="M4 19.5A2.5 2.5 0 0 0 6.5 22H20v-5"/>'),
   shield: SVG('<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>'),
 };
 export const icon = (name) => h('span', { class: 'ic', html: ICONS[name] });
@@ -152,3 +155,20 @@ addEventListener('popstate', () => {
   }
 });
 export const closeAll = () => [...sheets].reverse().forEach((s) => s.close());
+
+// Reduce una foto antes de guardarla (máx. 900 px, JPEG).
+export async function resizeImage(file, max = 900) {
+  let src, w, hgt;
+  try {
+    src = await createImageBitmap(file);
+    w = src.width; hgt = src.height;
+  } catch {
+    src = await new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = rej; i.src = URL.createObjectURL(file); });
+    w = src.naturalWidth; hgt = src.naturalHeight;
+  }
+  const k = Math.min(1, max / Math.max(w, hgt));
+  const c = document.createElement('canvas');
+  c.width = Math.round(w * k); c.height = Math.round(hgt * k);
+  c.getContext('2d').drawImage(src, 0, 0, c.width, c.height);
+  return new Promise((r) => c.toBlob(r, 'image/jpeg', 0.78));
+}

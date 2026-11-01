@@ -12,7 +12,7 @@ export function locSelect(value, { none = 'Sin ubicación', allowNew = true, onC
     sel.replaceChildren(...[
       none !== null ? h('option', { value: '' }, none) : null,
       ...st.locTree().map(({ loc, depth }) =>
-        h('option', { value: loc.id }, indent(depth) + loc.name + (loc.reserve ? ' · reserva' : ''))),
+        h('option', { value: loc.id }, st.locName(loc.id) + (st.isReserve(loc.id) ? ' · reserva' : ''))),
       allowNew ? h('option', { value: '__new' }, '+ Nueva ubicación…') : null,
     ].filter(Boolean));
     sel.value = v && st.getLoc(v) ? v : none !== null ? '' : sel.options[0]?.value || '';
@@ -66,7 +66,7 @@ export function editLocation({ id = null, parentId = null, onSaved } = {}) {
   const sub = isNew ? new Set() : st.locSubtree(l.id);
   const height = isNew ? 0 : st.locHeight(l.id);
   const parents = st.locTree().filter(({ loc, depth }) => !sub.has(loc.id) && depth + 1 + height <= MAX_DEPTH);
-  const parentSel = select([['', '— Ninguna: es una estancia —'], ...parents.map(({ loc, depth }) => [loc.id, indent(depth) + loc.name])],
+  const parentSel = select([['', '— Ninguna: es una estancia —'], ...parents.map(({ loc }) => [loc.id, st.locName(loc.id)])],
     l.parentId && st.getLoc(l.parentId) ? l.parentId : '');
   const inherited = l.parentId && st.isReserve(l.parentId);
   const reserve = toggle('De reserva', !!l.reserve,

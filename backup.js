@@ -158,6 +158,8 @@ export function readableHTML(data, title) {
   const legacy = (p) => [p.room, p.furniture, p.shelf].filter(Boolean).join(' › ');
   const habitual = (p) => (p.locationId ? lpath(p.locationId) : legacy(p));
   const unit = (u) => st.UNITS[u || 'ud'] || u;
+  const tagN = (p) => [...(p.tags || []).map((id) => data.tags?.[id]).filter((t) => t && !t.del).map((t) => `${t.symbol || ''} ${t.name}`.trim()), p.category].filter(Boolean).join(', ');
+  const storeN = (p) => (p.stores || []).map((id) => data.stores?.[id]).filter((x) => x && !x.del).map((x) => x.name).join(', ');
   const prods = alive(data.products).sort((a, b) => (a.name || '').localeCompare(b.name || '', 'es'));
   const byId = Object.fromEntries(prods.map((p) => [p.id, p]));
 
@@ -196,16 +198,32 @@ export function readableHTML(data, title) {
     if (!its.length) { out += '<p>(vacía)</p>'; continue; }
     out += '<ul>' + its.map((it) => {
       const p = byId[it.productId];
-      return `<li>${esc(p ? p.name : it.name)}${it.qty ? ' — ' + esc(st.fmtNum(it.qty) + ' ' + unit(p?.unit)) : ''}</li>`;
+      const where = p ? storeN(p) : data.stores?.[it.storeId]?.name;
+      return `<li>${esc(p ? p.name : it.name)}${where ? ' (' + esc(where) + ')' : ''}${it.qty ? ' — ' + esc(st.fmtNum(it.qty) + ' ' + unit(p?.unit)) : ''}</li>`;
     }).join('') + '</ul>';
   }
 
-  out += '<h2>Fichas de los artículos</h2><table border="1" cellpadding="4" cellspacing="0"><tr><th>Artículo</th><th>Categoría</th><th>Ubicación habitual</th><th>Mínimo</th><th>Reponer hasta</th><th>Marcas (código)</th><th>Notas</th></tr>';
+  out += '<h2>Fichas de los artículos</h2><table border="1" cellpadding="4" cellspacing="0"><tr><th>Artículo</th><th>Etiquetas</th><th>Tiendas</th><th>Ubicación habitual</th><th>Mínimo</th><th>Reponer hasta</th><th>Marcas (código)</th><th>Notas</th></tr>';
   for (const p of prods) {
     const marcas = (p.variants || []).map((v) => `${v.fav ? '★ ' : ''}${v.brand || 'sin nombre'}${v.barcode ? ' (' + v.barcode + ')' : ''}`).join('; ');
-    out += `<tr>${td(p.name)}${td(p.category)}${td(habitual(p))}${td(p.restock === false ? 'no se repone' : p.min || '')}${td(p.target || '')}${td(marcas)}${td(p.notes)}</tr>`;
+    out += `<tr>${td(p.name)}${td(tagN(p))}${td(storeN(p))}${td(habitual(p))}${td(p.restock === false ? 'no se repone' : p.min || '')}${td(p.target || '')}${td(marcas)}${td(p.notes)}</tr>`;
   }
   out += '</table>';
+
+  const recs = alive(data.recipes).sort((a, b) => (a.name || '').localeCompare(b.name || '', 'es'));
+  if (recs.length) {
+    out += '<h2>Recetas</h2>';
+    for (const r of recs) {
+      const min = (+r.prepMin || 0) + (+r.cookMin || 0);
+      out += `<h3>${esc(r.name)}</h3><p>${[r.servings ? r.servings + ' raciones' : '', r.prepMin ? 'preparación ' + r.prepMin + ' min' : '', r.cookMin ? 'cocción ' + r.cookMin + ' min' : '', min ? 'total ' + min + ' min' : ''].filter(Boolean).map(esc).join(' · ')}</p>`;
+      const cats = Object.entries(r.cats || {}).flatMap(([gid, ids]) => ids.map((id) => data.recipeGroups?.[gid]?.options?.find((o) => o.id === id)?.name)).filter(Boolean);
+      if (cats.length) out += `<p><i>${esc(cats.join(', '))}</i></p>`;
+      out += '<ul>' + (r.ingredients || []).map((i) => `<li>${esc(i.name)}${i.qty ? ': ' + esc(st.fmtNum(i.qty) + ' ' + (i.unit || '')) : ''}${i.optional ? ' (opcional)' : ''}</li>`).join('') + '</ul>';
+      if ((r.steps || []).length) out += '<ol>' + r.steps.map((x) => `<li>${esc(x)}</li>`).join('') + '</ol>';
+      if (r.notes) out += `<p>${esc(r.notes)}</p>`;
+      if (r.source) out += `<p>Fuente: ${esc(r.source)}</p>`;
+    }
+  }
 
   const tree = alive(locs);
   if (tree.length) {
