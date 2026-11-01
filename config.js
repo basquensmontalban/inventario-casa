@@ -3,7 +3,7 @@
 // ─────────────────────────────────────────────────────────────
 export const CONFIG = {
   // Pega aquí el «ID de cliente» que te da Google Cloud (paso 3 de la guía).
-  GOOGLE_CLIENT_ID: 'PEGA_AQUI_TU_ID.apps.googleusercontent.com',
+  GOOGLE_CLIENT_ID: '282335662414-t070oa59ds0ds8f1vicfek6qgd2fktj7.apps.googleusercontent.com',
 
   // Carpeta de Drive donde se guardan los datos y las fotos.
   DRIVE_FOLDER_NAME: 'Inventario Casa',
