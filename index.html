@@ -217,6 +217,24 @@
     .toast button { border: 0; background: none; color: var(--accent); font-weight: 700; filter: brightness(1.4); padding: 0; }
     @keyframes up { from { transform: translateY(12px); opacity: 0; } }
 
+    /* Ubicaciones, existencias por sitio y herramientas */
+    select.chip { max-width: 62vw; text-overflow: ellipsis; }
+    .loc-group { display: flex; align-items: center; gap: 6px; margin: 12px 2px 6px; font-size: 13px; font-weight: 700; color: var(--muted); }
+    .loc-group .ic { width: 16px; height: 16px; }
+    .stepper button.mv { margin-left: 4px; color: var(--muted); }
+    .stepper button .ic { width: 18px; height: 18px; }
+    .split { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 14px; color: var(--muted); font-size: 14px; margin-top: 4px; }
+    .split .linkbtn { padding: 4px 0; }
+    .tree-row { display: flex; align-items: center; gap: 8px; background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 6px 6px 6px 12px; margin-bottom: 6px; min-height: 54px; }
+    .tree-row.d1 { margin-left: 20px; }
+    .tree-row.d2 { margin-left: 40px; }
+    .toolbar { display: flex; flex-wrap: wrap; gap: 8px; margin: 10px 0 2px; }
+    .toolbar .ic { width: 18px; height: 18px; }
+    .btn-row .ic { width: 18px; height: 18px; }
+    .note-box .linkbtn { color: inherit; text-decoration: underline; padding: 0; }
+    a.btn { text-decoration: none; color: inherit; }
+    a.btn.primary { color: var(--accent-ink); }
+
     /* Escáner */
     .scanner { position: fixed; inset: 0; z-index: 90; background: #000; color: #fff; display: flex; flex-direction: column; }
     .scanner-top { display: flex; align-items: center; justify-content: space-between; padding: calc(10px + env(safe-area-inset-top)) 12px 10px 18px; font-weight: 600; }
@@ -246,9 +264,6 @@
 
   <div id="toasts" aria-live="polite"></div>
 
-  <datalist id="dl-rooms"></datalist>
-  <datalist id="dl-furniture"></datalist>
-  <datalist id="dl-shelves"></datalist>
   <datalist id="dl-categories"></datalist>
   <datalist id="dl-products"></datalist>
 

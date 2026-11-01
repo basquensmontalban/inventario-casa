@@ -1,13 +1,11 @@
 // Conexión con Google: inicio de sesión, Drive (datos y fotos) y Calendar (avisos).
 import { CONFIG } from './config.js';
-import {
-  S, meta, merge, newerThan, refreshAuto, commit, saveMeta, putSettings,
-  desiredAlerts, alive, uid,
-} from './store.js';
+import * as st from './store.js';
 import { photoGet, photoSet } from './db.js';
+import { runBackups } from './backup.js';
 
-const D = 'https://www.googleapis.com/drive/v3';
-const DU = 'https://www.googleapis.com/upload/drive/v3';
+export const DRIVE = 'https://www.googleapis.com/drive/v3';
+export const DRIVE_UP = 'https://www.googleapis.com/upload/drive/v3';
 const C = 'https://www.googleapis.com/calendar/v3';
 const STATE_FILE = 'inventario.json';
 
@@ -19,7 +17,7 @@ export function redirectUri() {
 }
 
 export function login({ silent = false } = {}) {
-  const state = uid();
+  const state = st.uid();
   localStorage.setItem('oauth_state', state);
   const p = new URLSearchParams({
     client_id: CONFIG.GOOGLE_CLIENT_ID,
@@ -72,7 +70,7 @@ export function logout() {
 
 export class AuthError extends Error {}
 
-async function api(url, opts = {}, { raw = false } = {}) {
+export async function api(url, opts = {}, { raw = false } = {}) {
   const t = token();
   if (!t) throw new AuthError('sin sesión');
   const r = await fetch(url, { ...opts, headers: { ...(opts.headers || {}), Authorization: 'Bearer ' + t } });
@@ -94,8 +92,33 @@ async function api(url, opts = {}, { raw = false } = {}) {
   return ct.includes('json') ? r.json() : r.text();
 }
 
-const jsonPost = (url, body, method = 'POST') =>
+export const jsonPost = (url, body, method = 'POST') =>
   api(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+
+export function multipartCreate(metadata, blob, fields = 'id') {
+  const fd = new FormData();
+  fd.append('metadata', new Blob([JSON.stringify(metadata)], { type: 'application/json' }));
+  fd.append('file', blob);
+  return api(`${DRIVE_UP}/files?uploadType=multipart&fields=${encodeURIComponent(fields)}`, { method: 'POST', body: fd });
+}
+
+export async function findOne(q) {
+  const r = await api(`${DRIVE}/files?` + new URLSearchParams({ q, fields: 'files(id)', spaces: 'drive', pageSize: '10' }));
+  return r.files?.[0]?.id || null;
+}
+
+export async function findOrCreateFolder(name, parent = null) {
+  const n = name.replace(/'/g, "\\'");
+  let q = `mimeType='application/vnd.google-apps.folder' and name='${n}' and trashed=false`;
+  if (parent) q += ` and '${parent}' in parents`;
+  let id = await findOne(q);
+  if (!id) {
+    const body = { name, mimeType: 'application/vnd.google-apps.folder' };
+    if (parent) body.parents = [parent];
+    id = (await jsonPost(`${DRIVE}/files?fields=id`, body)).id;
+  }
+  return id;
+}
 
 // ── Estado de sincronización (lo muestra la cabecera) ──
 export const sync = { status: 'idle', error: null };
@@ -108,37 +131,24 @@ function setStatus(s, error = null) {
 }
 
 // ── Drive ──
-async function findOne(q) {
-  const r = await api(`${D}/files?` + new URLSearchParams({ q, fields: 'files(id)', spaces: 'drive', pageSize: '10' }));
-  return r.files?.[0]?.id || null;
-}
-
-async function ensureFolder() {
-  if (meta.folderId) {
+export async function ensureFolder() {
+  const m = st.meta;
+  if (m.folderId) {
     try {
-      const f = await api(`${D}/files/${meta.folderId}?fields=id,trashed`);
-      if (!f.trashed) return meta.folderId;
+      const f = await api(`${DRIVE}/files/${m.folderId}?fields=id,trashed`);
+      if (!f.trashed) return m.folderId;
     } catch (e) {
       if (e instanceof AuthError) throw e;
     }
   }
-  const name = CONFIG.DRIVE_FOLDER_NAME.replace(/'/g, "\\'");
-  let id = await findOne(`mimeType='application/vnd.google-apps.folder' and name='${name}' and trashed=false`);
-  if (!id) id = (await jsonPost(`${D}/files?fields=id`, { name: CONFIG.DRIVE_FOLDER_NAME, mimeType: 'application/vnd.google-apps.folder' })).id;
-  if (meta.folderId !== id) meta.fileId = null;
-  meta.folderId = id;
+  const id = await findOrCreateFolder(CONFIG.DRIVE_FOLDER_NAME);
+  if (m.folderId !== id) { m.fileId = null; m.backupFolderId = null; m.deviceFileId = null; }
+  m.folderId = id;
   return id;
 }
 
-function multipartCreate(metadata, blob) {
-  const fd = new FormData();
-  fd.append('metadata', new Blob([JSON.stringify(metadata)], { type: 'application/json' }));
-  fd.append('file', blob);
-  return api(`${DU}/files?uploadType=multipart&fields=id`, { method: 'POST', body: fd });
-}
-
 async function uploadPhotos(folder) {
-  for (const p of alive(S.products)) {
+  for (const p of st.alive(st.S.products)) {
     if (!p.photo || p.photo.driveId) continue;
     const blob = await photoGet(p.photo.id);
     if (!blob) continue;
@@ -149,6 +159,7 @@ async function uploadPhotos(folder) {
 }
 
 // Foto local o, si falta, descargada de Drive.
+// Las fotos no se borran nunca de Drive, para que las copias de seguridad puedan recuperarlas.
 const urlCache = new Map();
 export async function photoURL(photo) {
   if (!photo) return null;
@@ -156,7 +167,7 @@ export async function photoURL(photo) {
   let blob = await photoGet(photo.id);
   if (!blob && photo.driveId && token() && navigator.onLine) {
     try {
-      const r = await api(`${D}/files/${photo.driveId}?alt=media`, {}, { raw: true });
+      const r = await api(`${DRIVE}/files/${photo.driveId}?alt=media`, {}, { raw: true });
       blob = await r.blob();
       await photoSet(photo.id, blob);
     } catch (e) { console.warn('foto', e); }
@@ -165,11 +176,6 @@ export async function photoURL(photo) {
   const url = URL.createObjectURL(blob);
   urlCache.set(photo.id, url);
   return url;
-}
-
-export async function deleteDrivePhoto(photo) {
-  if (!photo?.driveId || !token()) return;
-  try { await api(`${D}/files/${photo.driveId}`, { method: 'DELETE' }); } catch {}
 }
 
 // ── Sincronización completa ──
@@ -189,39 +195,50 @@ async function doSync() {
   if (!navigator.onLine) return setStatus('offline');
   if (!token()) return setStatus('auth');
   setStatus('syncing');
+  const m = st.meta;
   try {
     const folder = await ensureFolder();
     await uploadPhotos(folder);
 
-    if (!meta.fileId) meta.fileId = await findOne(`name='${STATE_FILE}' and '${folder}' in parents and trashed=false`);
+    if (!m.fileId) m.fileId = await findOne(`name='${STATE_FILE}' and '${folder}' in parents and trashed=false`);
     let remote = null;
-    if (meta.fileId) {
+    if (m.fileId) {
       try {
-        remote = await api(`${D}/files/${meta.fileId}?alt=media`);
+        remote = await api(`${DRIVE}/files/${m.fileId}?alt=media`);
         if (typeof remote === 'string') remote = JSON.parse(remote);
       } catch (e) {
-        if (e.status === 404) meta.fileId = null;
+        if (e.status === 404) m.fileId = null;
         else throw e;
       }
     }
-    merge(remote);
-    refreshAuto();
+    st.merge(remote);
+    st.refreshAuto();
 
     // El calendario se crea antes de subir los datos, para que el otro móvil lo reutilice.
     let calId = null;
     let calError = null;
     try {
-      if (desiredAlerts().length || S.settings.calendarId) calId = await ensureCalendar();
+      if (st.desiredAlerts().length || st.S.settings.calendarId) calId = await ensureCalendar();
     } catch (e) {
       if (e instanceof AuthError) throw e;
       calError = e.message;
     }
 
-    if (newerThan(remote)) {
-      meta.dirty = false;
-      const body = JSON.stringify(S);
-      if (meta.fileId) {
-        await api(`${DU}/files/${meta.fileId}?uploadType=media`, {
+    // Copias de seguridad (antes de subir, para que el otro móvil sepa cuándo fue la última).
+    try {
+      await runBackups();
+      m.backupError = null;
+    } catch (e) {
+      if (e instanceof AuthError) throw e;
+      m.backupError = e.message;
+      console.warn('backup', e);
+    }
+
+    m.dirty = false;
+    if (st.newerThan(remote)) {
+      const body = JSON.stringify(st.S);
+      if (m.fileId) {
+        await api(`${DRIVE_UP}/files/${m.fileId}?uploadType=media`, {
           method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body,
         });
       } else {
@@ -229,27 +246,25 @@ async function doSync() {
           { name: STATE_FILE, parents: [folder], mimeType: 'application/json' },
           new Blob([body], { type: 'application/json' }),
         );
-        meta.fileId = f.id;
+        m.fileId = f.id;
       }
-    } else {
-      meta.dirty = false;
     }
-    meta.lastSync = Date.now();
-    commit({ local: false });
+    m.lastSync = Date.now();
+    st.commit({ local: false });
 
     try {
       if (calId) await syncCalendar(calId);
-      meta.calError = calError;
+      m.calError = calError;
     } catch (e) {
       if (e instanceof AuthError) throw e;
-      meta.calError = e.message;
+      m.calError = e.message;
       console.warn('calendar', e);
     }
-    await saveMeta();
+    await st.saveMeta();
     setStatus('ok');
   } catch (e) {
     console.warn('sync', e);
-    await saveMeta();
+    await st.saveMeta();
     if (e instanceof AuthError) setStatus('auth');
     else setStatus(navigator.onLine ? 'error' : 'offline', e.message);
   }
@@ -259,7 +274,7 @@ async function doSync() {
 const tz = () => Intl.DateTimeFormat().resolvedOptions().timeZone || 'Europe/Madrid';
 
 async function ensureCalendar() {
-  const id = S.settings.calendarId;
+  const id = st.S.settings.calendarId;
   if (id) {
     try {
       await api(`${C}/calendars/${encodeURIComponent(id)}`);
@@ -270,7 +285,7 @@ async function ensureCalendar() {
     }
   }
   const c = await jsonPost(`${C}/calendars`, { summary: CONFIG.CALENDAR_NAME, timeZone: tz() });
-  putSettings({ calendarId: c.id });
+  st.putSettings({ calendarId: c.id });
   return c.id;
 }
 
@@ -288,7 +303,7 @@ function eventBody(w) {
 const evStart = (ev) => new Date(ev.start?.dateTime || ev.start?.date).getTime();
 
 async function syncCalendar(calId) {
-  const want = desiredAlerts();
+  const want = st.desiredAlerts();
   const cal = encodeURIComponent(calId);
   const timeMin = new Date(Date.now() - 45 * 864e5).toISOString();
   const events = [];
@@ -320,7 +335,7 @@ async function syncCalendar(calId) {
     if (!ev) await jsonPost(`${C}/calendars/${cal}/events`, eventBody(w));
     else if (!w.flexible && (ev.summary !== w.summary || evStart(ev) !== w.start.getTime()))
       await jsonPost(`${C}/calendars/${cal}/events/${ev.id}`, eventBody(w), 'PATCH');
-    else if (w.flexible && ev.summary !== w.summary)
+    else if (w.flexible && (ev.summary !== w.summary || ev.description !== w.description))
       await jsonPost(`${C}/calendars/${cal}/events/${ev.id}`, { summary: w.summary, description: w.description }, 'PATCH');
   }
 }
