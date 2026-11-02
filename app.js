@@ -9,7 +9,11 @@ import {
   $, h, icon, badge, hue, num, field, inp, toggle, select, numInput, indent, toast, openSheet, sheets, closeAll, nav, resizeImage,
 } from './ui.js';
 import { locSelect, openLocations, moveSheet, fromReserveSheet } from './locations.js';
-import { renderShop, shopItems } from './shop.js';
+import { renderShop, shopItems, focusQuickAdd } from './shop.js';
+import { loadRecent, search as qaSearch, addCandidate } from './quickadd.js';
+import { lookupBarcode, fetchImage, bestBasicFor } from './off.js';
+import { openSuper, isSuperOpen } from './supermode.js';
+import { openStockIn } from './stockin.js';
 import { renderSettings } from './settings.js';
 import { renderStores } from './stores.js';
 import { renderRecipes, editRecipe, openRecipe } from './recipes.js';
@@ -17,7 +21,7 @@ import { catalogPicker, openCatalog, label } from './catalog.js';
 import { openProductDB, findBasic, basicFields, approxExpiry, BASICOS } from './productdb.js';
 
 // ── Estado de la interfaz ──────────────────────────────────
-let tab = 'inv';
+let tab = 'shop';
 const ui = { q: '', filter: 'all', loc: '', tag: '', store: '' };
 
 function setTab(t) {
@@ -30,7 +34,8 @@ function setTab(t) {
 function render() {
   $('#title').textContent = { inv: 'Inventario', shop: 'Compra', recipes: 'Recetas', stores: 'Tiendas', set: 'Ajustes' }[tab];
   document.querySelectorAll('.tab').forEach((b) => b.classList.toggle('on', b.dataset.tab === tab));
-  $('#fabAdd').hidden = tab !== 'inv' && tab !== 'recipes';
+  $('#fabAdd').hidden = !['inv', 'recipes', 'shop'].includes(tab);
+  $('#fabAdd').lastChild.textContent = tab === 'shop' ? 'Apuntar' : 'Nuevo';
   const m = $('#main');
   if (tab === 'inv') renderInv(m);
   else if (tab === 'shop') renderShop(m);
@@ -184,9 +189,11 @@ function stockLocFor(p) {
 function thumbFor(p, cls = 'thumb') {
   const tag = st.productTags(p)[0];
   const sym = p.symbol || tag?.symbol;
-  const t = h('div', { class: cls + (sym && !p.photo ? ' emoji' : ''), style: `--hue:${hue(tag?.name || p.name)}` },
-    sym && !p.photo ? sym : (p.name || '?').trim().charAt(0).toUpperCase());
+  const pic = p.photo || p.photoUrl;
+  const t = h('div', { class: cls + (sym && !pic ? ' emoji' : ''), style: `--hue:${hue(tag?.name || p.name)}` },
+    sym && !pic ? sym : (p.name || '?').trim().charAt(0).toUpperCase());
   if (p.photo) g.photoURL(p.photo).then((u) => { if (u) { t.textContent = ''; t.style.backgroundImage = `url("${u}")`; } });
+  else if (p.photoUrl && navigator.onLine) { t.textContent = ''; t.style.backgroundImage = `url("${p.photoUrl}")`; }
   return t;
 }
 
@@ -221,6 +228,8 @@ function openProduct(id) {
       const img = h('img', { class: 'hero', alt: '' });
       g.photoURL(p.photo).then((u) => { if (u) img.src = u; else img.remove(); });
       out.push(img);
+    } else if (p.photoUrl && navigator.onLine) {
+      out.push(h('img', { class: 'hero contain', alt: '', src: p.photoUrl, onerror: (e) => e.target.remove() }));
     }
     out.push(h('div', { class: 'meta-line' }, st.productTags(p).map((t) => badge(label(t))),
       h('span', {}, st.loc(p) ? '📍 ' + st.loc(p) : 'Sin ubicación habitual')));
@@ -239,6 +248,7 @@ function openProduct(id) {
       h('button', { class: 'btn', disabled: tot <= 0, onclick: () => spend(id) }, icon('minus'), 'Gastar'),
       h('button', { class: 'btn primary', onclick: () => addStockSheet(id) }, icon('plus'), 'Añadir'),
       h('button', { class: 'btn', onclick: () => addToListSheet(id) }, icon('cart'), 'A lista')));
+    out.push(h('button', { class: 'btn block finished-btn', onclick: () => finished(id) }, '🚫 Se ha acabado (y apuntarlo)'));
 
     out.push(h('h3', {}, 'Existencias'));
     const lots = [...(p.lots || [])].sort((a, b) => (st.isReserve(a.locationId) - st.isReserve(b.locationId))
@@ -301,6 +311,26 @@ function lotRow(p, l) {
       h('b', { onclick: setQty }, st.fmtNum(l.qty)),
       h('button', { 'aria-label': 'Más', onclick: () => (isUd ? change(1) : setQty()) }, icon('plus')),
       h('button', { 'aria-label': 'Mover', class: 'mv', onclick: () => moveSheet(p.id, l.id) }, icon('move'))));
+}
+
+// «Se ha acabado»: pone a cero lo que hay a mano y lo apunta en la lista (si no estaba).
+function finished(id) {
+  const p = S.products[id];
+  const before = st.clone(p.lots || []);
+  p.lots = (p.lots || []).filter((l) => st.isReserve(l.locationId));
+  st.putProduct(p);
+  let added = null;
+  if (!st.onList(S.products[id])) {
+    added = uid();
+    st.putItem({ id: added, productId: id, listId: st.validList(p.listId), qty: +p.min > 0 ? st.suggest(S.products[id]) : 1 });
+  }
+  const res = st.inReserve(S.products[id]);
+  toast(`${p.name}: apuntado en la lista${res > 0 ? ` (quedan ${st.fmtQty(res, p.unit)} en reserva)` : ''}`, { action: 'Deshacer', ms: 6000, onAction: () => {
+    const q = S.products[id];
+    q.lots = before;
+    st.putProduct(q);
+    if (added) st.deleteItem(added);
+  } });
 }
 
 function spend(id) {
@@ -432,10 +462,10 @@ function editProduct({ id = null, preset = null, onSaved, focusBrand = false } =
 
   // Foto
   const photoThumb = thumbFor(p);
-  if (!p.photo) photoThumb.replaceChildren(icon('camera'));
+  if (!p.photo && !p.photoUrl) photoThumb.replaceChildren(icon('camera'));
   const fileIn = h('input', { type: 'file', accept: 'image/*', capture: 'environment', hidden: true });
-  const photoDelBtn = h('button', { class: 'btn small danger', hidden: !p.photo, onclick: (e) => {
-    e.preventDefault(); removePhoto = true; newPhoto = null; photoThumb.style.backgroundImage = ''; photoThumb.replaceChildren(icon('camera')); photoDelBtn.hidden = true;
+  const photoDelBtn = h('button', { class: 'btn small danger', hidden: !p.photo && !p.photoUrl, onclick: (e) => {
+    e.preventDefault(); removePhoto = true; newPhoto = null; p.photoUrl = null; photoThumb.style.backgroundImage = ''; photoThumb.replaceChildren(icon('camera')); photoDelBtn.hidden = true;
   } }, 'Quitar');
   fileIn.addEventListener('change', async () => {
     const f = fileIn.files[0];
@@ -505,6 +535,7 @@ function editProduct({ id = null, preset = null, onSaved, focusBrand = false } =
       const pid = uid();
       await photoSet(pid, newPhoto);
       p.photo = { id: pid, driveId: null };
+      p.photoUrl = null;
     } else if (removePhoto) p.photo = null;
     if (old && (newPhoto || removePhoto)) photoDel(old.id);
     st.putProduct(p);
@@ -582,32 +613,63 @@ function scanResult(id, variantId) {
         h('button', { class: 'btn', disabled: st.total(p) <= 0, onclick: () => spend(id) }, icon('minus'), 'Gastar'),
         h('button', { class: 'btn primary', onclick: () => { s.close(); addStockSheet(id, { variantId }); } }, icon('plus'), 'Añadir'),
         h('button', { class: 'btn', onclick: () => { s.close(); openProduct(id); } }, 'Ficha')),
+      h('button', { class: 'btn primary block', onclick: () => { s.close(); addToListSheet(id); } }, icon('cart'), 'Apuntar en la lista de la compra'),
+      h('button', { class: 'btn block', onclick: () => { s.close(); finished(id); } }, '🚫 Se ha acabado'),
       h('button', { class: 'btn block', onclick: () => { s.close(); scanFlow(); } }, icon('scan'), 'Escanear otro'),
     ];
   }, { live: true });
 }
 
+// Código que no está en el inventario: se busca en Open Food Facts para rellenar nombre, marca y foto.
 function unknownCode(code) {
-  const s = openSheet('Código nuevo', () => [
-    h('p', {}, 'El código ', h('b', {}, code), ' no está en el inventario.'),
-    h('button', { class: 'btn primary block', onclick: () => {
-      s.close();
-      editProduct({
-        preset: { ...newProductDraft(), variants: [{ id: uid(), brand: '', barcode: code, fav: true }] },
-        onSaved: (id) => addStockSheet(id),
-      });
-    } }, icon('plus'), 'Crear artículo nuevo'),
-    h('button', { class: 'btn block', onclick: () => {
-      s.close();
-      pickProduct('¿De qué artículo es esta marca?', (id) => {
-        const p = st.clone(S.products[id]);
-        p.variants = p.variants || [];
-        const v = { id: uid(), brand: '', barcode: code, fav: !p.variants.length };
-        p.variants.push(v);
-        editProduct({ id, preset: p, focusBrand: true, onSaved: (pid) => addStockSheet(pid, { variantId: v.id }) });
-      });
-    } }, 'Es otra marca de un artículo que ya tengo'),
-  ]);
+  let loading = navigator.onLine;
+  let off = null;
+  const addBrandTo = (id, brand) => {
+    const p = st.clone(S.products[id]);
+    p.variants = p.variants || [];
+    const v = { id: uid(), brand: brand || '', barcode: code, fav: !p.variants.length };
+    p.variants.push(v);
+    editProduct({ id, preset: p, focusBrand: !brand, onSaved: (pid) => addStockSheet(pid, { variantId: v.id }) });
+  };
+  const create = async (name, b) => {
+    s.close();
+    const preset = { ...newProductDraft(), ...(b ? basicFields(b) : {}), name: name || '',
+      variants: [{ id: uid(), brand: off?.brand || '', barcode: code, fav: true }] };
+    if (off?.quantity) preset.notes = 'Formato: ' + off.quantity;
+    if (off?.image) {
+      const blob = await fetchImage(off.image);
+      if (blob) {
+        const pid = uid();
+        await photoSet(pid, await resizeImage(blob));
+        preset.photo = { id: pid, driveId: null };
+      } else preset.photoUrl = off.image;
+    }
+    editProduct({ preset, onSaved: (id) => addStockSheet(id) });
+  };
+  const s = openSheet('Código nuevo', () => {
+    const b = off ? bestBasicFor(off.name) : null;
+    const same = b ? st.products().find((p) => st.norm(p.name) === st.norm(b.name)) : null;
+    return [
+      h('p', {}, 'El código ', h('b', {}, code), ' no está en el inventario.'),
+      loading ? h('p', { class: 'muted' }, 'Buscando en Open Food Facts…') : null,
+      off ? h('div', { class: 'off-card' },
+        off.image ? h('img', { src: off.image, alt: '', onerror: (e) => e.target.remove() }) : null,
+        h('div', {}, h('b', {}, off.name), h('div', { class: 'muted' }, [off.brand, off.quantity].filter(Boolean).join(' · ')),
+          h('small', { class: 'hint' }, 'Datos de Open Food Facts'))) : null,
+      !loading && !off ? h('p', { class: 'muted' }, navigator.onLine ? 'No aparece en Open Food Facts: créalo a mano.' : 'Sin conexión: créalo a mano.') : null,
+      same ? h('button', { class: 'btn primary block', onclick: () => { s.close(); addBrandTo(same.id, off.brand); } },
+        `Es otra marca de «${same.name}»`) : null,
+      off ? h('button', { class: 'btn block' + (same ? '' : ' primary'), onclick: () => create(off.name, b) }, icon('plus'), `Crear «${off.name}»`) : null,
+      off && b && !same && st.norm(b.name) !== st.norm(off.name)
+        ? h('button', { class: 'btn block', onclick: () => create(b.name, b) }, `Crear como «${b.name}» (nombre genérico)`) : null,
+      h('button', { class: 'btn block' + (!off ? ' primary' : ''), onclick: () => create('', null) }, icon('plus'), off ? 'Crear a mano' : 'Crear artículo nuevo'),
+      h('button', { class: 'btn block', onclick: () => {
+        s.close();
+        pickProduct('¿De qué artículo es esta marca?', (id) => addBrandTo(id, off?.brand));
+      } }, 'Es otra marca de un artículo que ya tengo'),
+    ];
+  }, { live: true });
+  if (loading) lookupBarcode(code).then((r) => { off = r; loading = false; s.refresh(); });
 }
 
 function pickProduct(title, onPick) {
@@ -656,9 +718,9 @@ function maybeSilentLogin() {
 // ── Arranque ───────────────────────────────────────────────
 // Pestañas visibles, tema y tamaño de letra de este móvil.
 function applyChrome() {
-  const vis = { inv: true, shop: D.tabs.shop !== false, recipes: D.tabs.recipes !== false, stores: D.tabs.stores !== false, set: true };
+  const vis = { inv: true, shop: true, recipes: D.tabs.recipes !== false, stores: D.tabs.stores !== false, set: true };
   document.querySelectorAll('.tab').forEach((b) => { b.hidden = !vis[b.dataset.tab]; });
-  if (!vis[tab]) tab = 'inv';
+  if (!vis[tab]) tab = 'shop';
   const root = document.documentElement;
   if (D.theme === 'light' || D.theme === 'dark') root.dataset.theme = D.theme; else delete root.dataset.theme;
   const dark = D.theme === 'dark' || (D.theme !== 'light' && matchMedia('(prefers-color-scheme: dark)').matches);
@@ -672,12 +734,13 @@ async function start() {
   const res = g.handleRedirect();
   await st.load();
   await loadDevice();
-  tab = ['shop', 'stores', 'recipes'].includes(D.startTab) && D.tabs[D.startTab] !== false ? D.startTab : 'inv';
+  await loadRecent();
+  tab = D.startTab === 'inv' || (['stores', 'recipes'].includes(D.startTab) && D.tabs[D.startTab] !== false) ? D.startTab : 'shop';
 
   $('#btnSettings').append(icon('gear'));
   $('#btnSettings').onclick = () => setTab('set');
   $('#fabAdd').append(icon('plus'), 'Nuevo');
-  $('#fabAdd').onclick = () => (tab === 'recipes' ? editRecipe() : editProduct());
+  $('#fabAdd').onclick = () => (tab === 'recipes' ? editRecipe() : tab === 'shop' ? focusQuickAdd() : editProduct());
   $('#btnScan').append(icon('scan'));
   $('#btnScan').onclick = () => { closeAll(); scanFlow(); };
   const invTab = $('.tab[data-tab="inv"]');
@@ -712,6 +775,7 @@ async function start() {
     if (/required/.test(res.error)) toast('Toca «Conectar» para volver a sincronizar');
     else if (res.error !== 'access_denied') toast('No se pudo conectar: ' + res.error);
   }
+  if (handleUrlActions()) await st.flush();
   if (!res && maybeSilentLogin()) return;
   g.syncNow();
 
@@ -722,7 +786,43 @@ async function start() {
     rerender();
     if (!maybeSilentLogin()) g.syncNow();
   });
-  setInterval(() => { if (document.visibilityState === 'visible') g.syncNow(); }, 5 * 60000);
+  // Con la compra abierta (o en el modo súper) se sincroniza cada 20 s; si no, cada 5 min.
+  let lastAuto = Date.now();
+  setInterval(() => {
+    if (document.visibilityState !== 'visible') return;
+    const fast = tab === 'shop' || isSuperOpen();
+    if (Date.now() - lastAuto >= (fast ? 20e3 : 5 * 60e3)) { lastAuto = Date.now(); g.syncNow(); }
+  }, 5000);
+}
+
+// Enlaces del tipo …/?apuntar=leche,tomates o …/?accion=super (accesos directos y Atajos de Siri).
+function handleUrlActions() {
+  const q = new URLSearchParams(location.search);
+  if (![...q.keys()].length) return false;
+  history.replaceState(null, '', location.pathname);
+  const text = q.get('apuntar');
+  if (text) {
+    const names = text.split(/\s*(?:,|;|\n|\by\b)\s*/i).map((x) => x.trim()).filter(Boolean);
+    const done = [];
+    for (const n of names) {
+      const best = qaSearch(n, 1)[0];
+      const c = best && best.score >= 85 ? best : { kind: 'free', name: n.charAt(0).toUpperCase() + n.slice(1) };
+      addCandidate(c, { listId: (p) => (p ? st.validList(p.listId) : st.GENERAL), storeId: '' });
+      done.push(c.name);
+    }
+    setTab('shop');
+    const standalone = navigator.standalone || matchMedia('(display-mode: standalone)').matches;
+    if (done.length) {
+      toast('Apuntado: ' + done.join(', ') + (!standalone && !g.everConnected()
+        ? '. Ojo: este navegador no está conectado a Google, así que no llegará al otro móvil (conéctalo en Ajustes › Cuenta).' : ''), { ms: 8000 });
+    }
+  }
+  const action = q.get('accion');
+  if (action === 'apuntar') { setTab('shop'); setTimeout(focusQuickAdd, 300); }
+  if (action === 'escanear') setTimeout(scanFlow, 300);
+  if (action === 'super') { setTab('shop'); setTimeout(() => openSuper({}), 300); }
+  if (action === 'guardar') setTimeout(openStockIn, 300);
+  return !!text;
 }
 
 start();

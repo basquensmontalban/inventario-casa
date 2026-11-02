@@ -3,8 +3,8 @@ import { kvGet, kvSet } from './db.js';
 
 export const GENERAL = 'general';
 export const UNITS = { ud: 'ud.', kg: 'kg', g: 'g', l: 'l', ml: 'ml' };
-export const SCHEMA = 5;
-const COLLECTIONS = ['products', 'lists', 'items', 'locations', 'tags', 'stores', 'recipes', 'recipeGroups'];
+export const SCHEMA = 6;
+const COLLECTIONS = ['products', 'lists', 'items', 'locations', 'tags', 'stores', 'recipes', 'recipeGroups', 'menu', 'freq'];
 
 export const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 const now = () => Date.now();
@@ -33,6 +33,8 @@ function emptyState() {
     stores: {},
     recipes: {},
     recipeGroups: {},
+    menu: {},
+    freq: {},
     settings: { ...DEFAULT_SETTINGS },
     backupInfo: { last: 0, by: '', u: 0 },
   };
@@ -115,7 +117,8 @@ export const FOOD_TAXONOMY = ['Alimentación', '🍽️', [
   ['Fruta', '🍎'], ['Verdura', '🥬'], ['Carne', '🥩'], ['Pescado y marisco', '🐟'], ['Embutidos', '🥓'], ['Lácteos', '🥛'],
   ['Quesos', '🧀'], ['Huevos', '🥚'], ['Pan y bollería', '🍞'], ['Pasta y arroz', '🍝'], ['Legumbres', '🫘'], ['Conservas', '🥫'],
   ['Cereales y desayuno', '🥣'], ['Harinas y repostería', '🌾'], ['Aceites y vinagres', '🫒'], ['Especias y condimentos', '🧂'],
-  ['Salsas', '🫙'], ['Café e infusiones', '☕'], ['Dulces y snacks', '🍫'], ['Frutos secos', '🥜'], ['Bebidas', '🥤'],
+  ['Hierbas secas', '🌿'], ['Chiles y pimientas', '🌶️'], ['Mezclas de especias', '🍛'], ['Pastas de curry y especias', '🥘'],
+  ['Salsas', '🫙'], ['Salsas asiáticas', '🥢'], ['Caldos y fondos', '🍲'], ['Café e infusiones', '☕'], ['Dulces y snacks', '🍫'], ['Frutos secos', '🥜'], ['Bebidas', '🥤'],
   ['Congelados', '🧊'], ['Platos preparados', '🍱'],
 ]];
 function seedTaxonomy() {
@@ -128,7 +131,8 @@ function ensureTagSeed(name, symbol, parentId, order) {
   const found = alive(S.tags).find((t) => norm(t.name) === norm(name)) || S.tags[id];
   if (found) {
     if (!found.del && found.parentId === undefined) found.parentId = parentId;
-    if (!found.del && found.order === undefined && order !== undefined) found.order = order;
+    // Las que nunca se han tocado (fecha 1) siguen el orden de la lista inicial.
+    if (!found.del && order !== undefined && (found.order === undefined || found.u === 1)) found.order = order;
     return found.id;
   }
   S.tags[id] = { id, name, symbol, parentId, order, u: 1 };
@@ -164,6 +168,8 @@ function ensurePath(names, t) {
 }
 
 export const saveMeta = () => kvSet('meta', meta);
+// Espera a que todo quede escrito en el móvil (antes de salir de la página).
+export async function flush() { await kvSet('state', S); await saveMeta(); }
 
 // Guarda y avisa a la interfaz. local=true marca que hay cambios por subir.
 export function commit({ local = true } = {}) {
@@ -381,6 +387,20 @@ export function addStock(p, { variantId = null, qty = 1, expiry = null, location
     locationId: locationId === undefined ? p.locationId || null : locationId || null });
   mergeLots(p);
   putProduct(p);
+}
+
+// Varias entradas de golpe (guardar la compra): una sola grabación al final.
+export function addStockBatch(entries) {
+  const t = now();
+  for (const { productId, variantId = null, qty, expiry = null, locationId } of entries) {
+    const p = S.products[productId];
+    if (!p || p.del || !(+qty > 0)) continue;
+    p.lots = p.lots || [];
+    p.lots.push({ id: uid(), variantId, qty: round(qty), expiry: expiry || null, locationId: locationId === undefined ? p.locationId || null : locationId || null });
+    mergeLots(p);
+    p.u = t;
+  }
+  commit();
 }
 
 // Gasta primero lo que está a mano (lo que caduca antes) y después la reserva.
@@ -669,4 +689,60 @@ export function recipeStatus(r, orangeMax = 2) {
   });
   const n = missing.length;
   return { n, missing, level: n === 0 ? 'ok' : n <= orangeMax ? 'few' : 'many' };
+}
+
+// ── Lo que más compráis: cuántas veces y cuándo se ha comprado cada cosa ──
+export const freqKey = (productId, name) => (productId ? 'fp-' + productId : 'fn-' + hash(norm(name)));
+export function recordPurchase(productId, name, undo = false) {
+  const key = freqKey(productId, name);
+  const t = now();
+  const f = S.freq[key] && !S.freq[key].del ? S.freq[key] : { id: key, productId: productId || null, name, count: 0, times: [] };
+  if (undo) {
+    const last = f.times[f.times.length - 1];
+    if (last && t - last < 3 * 3600e3) { f.times.pop(); f.count = Math.max(0, f.count - 1); }
+  } else {
+    f.count += 1;
+    f.times = [...f.times, t].slice(-8);
+  }
+  f.name = name;
+  f.u = t;
+  S.freq[key] = f;
+}
+// Sugerencias: lo que toca volver a comprar (por su ritmo habitual) y lo más comprado.
+export function frequentSuggestions(limit = 10) {
+  const t = now();
+  const onListKeys = new Set(alive(S.items).filter((it) => !it.done && !it.dismissed).map((it) => freqKey(it.productId, it.name)));
+  return alive(S.freq)
+    .filter((f) => f.count >= 2 && !onListKeys.has(f.id) && (!f.productId || (S.products[f.productId] && !S.products[f.productId].del)))
+    .map((f) => {
+      const ts = f.times;
+      const gaps = ts.slice(1).map((x, i) => x - ts[i]).filter((g) => g > 12 * 3600e3);
+      const avg = gaps.length ? gaps.reduce((a, b) => a + b, 0) / gaps.length : null;
+      const since = t - ts[ts.length - 1];
+      const due = avg ? since / avg : 0;
+      return { ...f, avg, since, due };
+    })
+    .filter((f) => f.since > 12 * 3600e3)
+    .sort((a, b) => (b.due >= 0.9) - (a.due >= 0.9) || b.due - a.due || b.count - a.count)
+    .slice(0, limit);
+}
+
+// ── Menú semanal: un registro por día y comida ──
+export const menuKey = (date, slot) => `${date}|${slot}`;
+export const menuEntry = (date, slot) => { const e = S.menu[menuKey(date, slot)]; return e && !e.del ? e : null; };
+export function putMenu(date, slot, data) {
+  const id = menuKey(date, slot);
+  S.menu[id] = { id, date, slot, ...data, u: now() };
+  commit();
+}
+export function clearMenu(date, slot) {
+  const id = menuKey(date, slot);
+  S.menu[id] = { id, del: true, u: now() };
+  commit();
+}
+export function mondayOf(ymdStr) {
+  const [y, m, d] = ymdStr.split('-').map(Number);
+  const dt = new Date(y, m - 1, d);
+  const wd = (dt.getDay() + 6) % 7;
+  return ymd(new Date(y, m - 1, d - wd));
 }

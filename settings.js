@@ -4,12 +4,13 @@ import { S, GENERAL } from './store.js';
 import { D, setDevice, setDeviceIn, applyDevice, resetDevice } from './device.js';
 import * as g from './google.js';
 import * as bk from './backup.js';
-import { h, icon, field, inp, select, toggle, openSheet, toast, download, pickFile, fmtDateTime, closeAll, nav } from './ui.js';
+import { h, icon, field, inp, select, toggle, openSheet, toast, download, pickFile, fmtDateTime, closeAll, nav, copyText } from './ui.js';
 import { locSelect, openLocations } from './locations.js';
 import { openCatalog, label } from './catalog.js';
 import { openGroups } from './recipes.js';
+import { slotToggles } from './menu.js';
 
-export const VERSION = '1.5.0';
+export const VERSION = '1.7.0';
 
 const pl = (n, one, many) => `${n} ${n === 1 ? one : many}`;
 const TAB_NAMES = { inv: 'Inventario', shop: 'Compra', recipes: 'Recetas', stores: 'Tiendas' };
@@ -31,7 +32,7 @@ export function renderSettings(m) {
     h('div', { class: 'set-h' }, h('h3', {}, 'Este móvil'), h('small', {}, D.name)),
     h('p', { class: 'hint' }, 'Solo afecta a este móvil; el otro tiene su propia configuración.'),
     h('div', { class: 'list' },
-      row('📱', 'General', `Pestañas, tema y letra · Abre en ${TAB_NAMES[D.startTab] || 'Inventario'}`, secGeneral),
+      row('📱', 'General', `Pestañas, tema y letra · Abre en ${TAB_NAMES[D.startTab] || 'Compra'}`, secGeneral),
       row('📦', 'Inventario', `Filtros visibles, orden y valores para artículos nuevos`, secInventory),
       row('🛒', 'Compra', `Lista al abrir, al marcar comprado y formato al copiar`, secShop),
       row('🍲', 'Recetas', `Colores, filtros visibles y valores por defecto`, secRecipes),
@@ -65,12 +66,13 @@ const sub = (text) => h('h4', { class: 'sub-h' }, text);
 
 function secGeneral() {
   const s = openSheet('General', () => {
-    const tabs = [['inv', 'Inventario'], ...['shop', 'recipes', 'stores'].filter((t) => D.tabs[t] !== false).map((t) => [t, TAB_NAMES[t]])];
+    const tabs = [['shop', 'Compra'], ['inv', 'Inventario'], ...['recipes', 'stores'].filter((t) => D.tabs[t] !== false).map((t) => [t, TAB_NAMES[t]])];
     return [
       field('Nombre de este móvil', inp({ value: D.name, onchange: (e) => setDevice({ name: e.target.value.trim() || D.name }) })),
       field('Al abrir la app, mostrar', select(tabs, D.startTab, { onchange: (e) => setDevice({ startTab: e.target.value }) })),
       sub('Pestañas que se ven'),
-      ...['shop', 'recipes', 'stores'].map((t) => toggle(TAB_NAMES[t], D.tabs[t] !== false, null, (v) => { setDeviceIn('tabs', t, v); s.refresh(); })),
+      h('p', { class: 'hint' }, 'Compra e Inventario se ven siempre.'),
+      ...['recipes', 'stores'].map((t) => toggle(TAB_NAMES[t], D.tabs[t] !== false, null, (v) => { setDeviceIn('tabs', t, v); s.refresh(); })),
       sub('Aspecto'),
       dSel('Tema', [['auto', 'Automático (como el móvil)'], ['light', 'Claro'], ['dark', 'Oscuro']], 'theme'),
       dSel('Tamaño de la letra', [['1', 'Normal'], ['1.1', 'Grande'], ['1.2', 'Muy grande']], 'fontScale'),
@@ -116,8 +118,12 @@ function secShop() {
       field('Lista al abrir', select([['__all', 'Todas'], ...st.lists().map((l) => [l.id, l.name])], D.shopList || '__all', { onchange: (e) => setDevice({ shopList: e.target.value }) })),
       st.stores().length ? field('Filtrar por tienda al abrir', select([['', 'No, todas las tiendas'], ...st.stores().map((x) => [x.id, label(x)])], D.shopStore || '', { onchange: (e) => setDevice({ shopStore: e.target.value }) })) : null,
       dTog('Al filtrar por tienda, mostrar lo que no tiene tienda', 'shopUnassigned'),
-      dSel('Ordenar', [['name', 'Por nombre'], ['location', 'Por ubicación en casa']], 'shopSort'),
-      dTog('Al marcar comprado, preguntar cantidad y caducidad', 'shopAskOnBuy', 'Si lo apagas, se suma directamente la cantidad de la lista (con opción de deshacer)'),
+      dSel('Ordenar', [['category', 'Por categoría (pasillos del súper)'], ['name', 'Por nombre'], ['location', 'Por ubicación en casa']], 'shopSort'),
+      dSel('Al tachar algo', [['cart', 'Va al carro y la guardo al llegar a casa'], ['ask', 'Preguntar cantidad y caducidad'], ['quick', 'Sumarlo al inventario directamente']], 'shopOnBuy',
+        '«Al carro»: luego, en casa, «Guardar la compra» lo pasa todo al inventario de una vez.'),
+      dTog('Mostrar «Soléis comprar»', 'shopSuggest', 'Sugerencias según lo que compráis y cada cuánto'),
+      dTog('Modo súper con letra grande', 'superBig'),
+      h('button', { class: 'btn small', style: 'margin-top:8px', onclick: apuntarHelp }, '🗣️ Apuntar sin abrir la app (Siri, accesos directos)'),
       sub('Al copiar o compartir una lista'),
       t('Incluir cantidades', 'copyQty'), t('Incluir la marca favorita', 'copyBrand'), t('Incluir el nombre de la lista', 'copyTitle'),
       field('Viñeta', select([['- ', 'Guion  -'], ['• ', 'Punto  •'], ['☐ ', 'Casilla  ☐'], ['', 'Ninguna']], D.copyBullet ?? '- ',
@@ -125,6 +131,26 @@ function secShop() {
       h('span', { class: 'lbl' }, 'Así queda'), preview,
     ];
   });
+}
+
+// Cómo apuntar sin abrir la app: accesos directos (Android) y Atajos con Siri (iPhone).
+function apuntarHelp() {
+  const base = `${location.origin}${location.pathname}?apuntar=`;
+  openSheet('Apuntar sin abrir la app', () => [
+    h('h3', {}, 'Android'),
+    h('p', {}, 'Mantén pulsado el icono de la app: salen «Apuntar», «Súper», «Escanear» y «Guardar compra». Puedes arrastrarlos a la pantalla de inicio.'),
+    h('h3', {}, 'iPhone: «Oye Siri, apunta…»'),
+    h('ol', { class: 'steps' },
+      h('li', {}, 'Abre la app ', h('b', {}, 'Atajos'), ' y toca ', h('b', {}, '+'), ' para crear uno nuevo. Llámalo, por ejemplo, ', h('b', {}, 'Apunta en la compra'), '.'),
+      h('li', {}, 'Añade la acción ', h('b', {}, 'Dictar texto'), ' (idioma: español).'),
+      h('li', {}, 'Añade la acción ', h('b', {}, 'URL'), ' y escribe la dirección de abajo; al final, inserta la variable ', h('b', {}, 'Texto dictado'), '.'),
+      h('li', {}, 'Añade la acción ', h('b', {}, 'Abrir URL'), '.'),
+      h('li', {}, 'Di «Oye Siri, apunta en la compra» y luego, por ejemplo, «leche, tomates y papel de cocina».')),
+    h('pre', { class: 'preview' }, base),
+    h('button', { class: 'btn small', onclick: async () => toast((await copyText(base)) ? 'Dirección copiada' : 'No se pudo copiar') }, icon('copy'), 'Copiar la dirección'),
+    h('p', { class: 'hint' }, 'Importante: en el iPhone, los atajos abren la app en Safari, no en el icono de la pantalla de inicio, y Safari guarda sus datos aparte. ',
+      'La primera vez, conecta Google también en Safari (Ajustes › Cuenta) para que lo apuntado se suba a Drive y llegue a la app y al otro móvil en unos segundos.'),
+  ]);
 }
 
 function secRecipes() {
@@ -136,6 +162,8 @@ function secRecipes() {
     sub('Al añadir ingredientes a la lista'),
     field('Lista', select(listOpts('General'), D.recListId || '', { onchange: (e) => setDevice({ recListId: e.target.value }) })),
     dSel('Marcar de entrada', [['missing', 'Solo lo que falta'], ['all', 'Todos los ingredientes']], 'recListMode'),
+    sub('Menú semanal: comidas que se planifican'),
+    ...slotToggles(),
     sub('Filtros que se ven'),
     dTogIn('Disponibilidad', 'recFilters', 'avail'), dTogIn('Tiempo', 'recFilters', 'time'),
     dTogIn('Ingrediente', 'recFilters', 'ing'), dTogIn('Orden', 'recFilters', 'sort'),

@@ -98,6 +98,13 @@ async function prune() {
   }
 }
 
+// ¿Hay alguna copia pendiente de hacer?
+export function backupDue() {
+  const m = st.meta;
+  const every = (+st.S.settings.backupEveryDays || 1) * 864e5;
+  return !!m.pendingUpgradeBackup || (D.u || 0) > (m.deviceSavedAt || 0) || Date.now() - (st.S.backupInfo?.last || 0) >= every - 3600e3;
+}
+
 // Se llama en cada sincronización.
 export async function runBackups() {
   const m = st.meta;

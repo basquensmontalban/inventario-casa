@@ -5,8 +5,8 @@ import { uid } from './store.js';
 export const DEFAULTS = {
   // General
   name: '',
-  startTab: 'inv',            // inv | shop | recipes | stores
-  tabs: { shop: true, recipes: true, stores: true },
+  startTab: 'shop',           // shop | inv | recipes | stores
+  tabs: { recipes: true, stores: true },
   theme: 'auto',              // auto | light | dark
   fontScale: 1,               // 1 | 1.1 | 1.2
   vibrate: true,              // vibrar al leer un código
@@ -26,8 +26,10 @@ export const DEFAULTS = {
   shopList: '__all',          // lista al abrir
   shopStore: '',              // tienda filtrada al abrir
   shopUnassigned: true,       // al filtrar por tienda, mostrar lo que no tiene tienda
-  shopAskOnBuy: true,         // al marcar comprado: preguntar cantidad y caducidad
-  shopSort: 'name',           // name | location
+  shopOnBuy: 'cart',          // al tachar: cart (al carro, se guarda luego) | ask (preguntar) | quick (sumar directamente)
+  shopSuggest: true,          // mostrar «Soléis comprar»
+  superBig: true,             // modo súper con letra grande
+  shopSort: 'category',       // category | name | location
   copyQty: true,
   copyBrand: false,
   copyTitle: true,
@@ -41,6 +43,7 @@ export const DEFAULTS = {
   recServings: 2,
   recListId: '',
   recListMode: 'missing',     // missing | all
+  menuSlots: ['comida', 'cena'], // comidas del menú semanal: desayuno, comida, merienda, cena
 
   // Tiendas
   storesDefault: '',          // '' = la que tenga más cosas pendientes
@@ -70,6 +73,22 @@ function withDefaults(o) {
 
 export async function loadDevice() {
   D = withDefaults(await kvGet('device'));
+  // v1.6: la app pasa a abrirse en la lista de la compra.
+  if (!D.shopFirst) {
+    D.shopFirst = true;
+    if (D.startTab === 'inv') D.startTab = 'shop';
+    if (D.tabs) D.tabs.shop = true;
+    if (D.shopSort === 'name') D.shopSort = 'category';
+    D.u = Date.now();
+    await kvSet('device', D);
+  }
+  // v1.7: al tachar, por defecto va al carro y se guarda la compra al llegar a casa.
+  if (!D.v17) {
+    D.v17 = true;
+    if (D.shopAskOnBuy === false) D.shopOnBuy = 'quick';
+    D.u = Date.now();
+    await kvSet('device', D);
+  }
   if (!D.id) {
     D.id = uid();
     D.name = D.name || guessName();

@@ -1,6 +1,7 @@
 // Base de productos básicos: nombre, símbolo, subcategoría, unidad, dónde se guarda y
 // días aproximados que aguanta desde la compra (sin abrir). Son orientativos: revisa siempre la etiqueta.
-// [nombre, símbolo, subcategoría, unidad, conservación, días]
+// [nombre, símbolo, subcategoría, unidad, conservación, días, sinónimos separados por |]
+import { ESPECIAS } from './especias.js';
 const N = 'nevera';
 const P = 'despensa';
 const C = 'congelador';
@@ -65,15 +66,15 @@ const RAW = [
   ['Harina de trigo', '🌾', 'Harinas y repostería', 'ud', P, 365], ['Azúcar', '🍬', 'Harinas y repostería', 'ud', P, 1095], ['Levadura', '🌾', 'Harinas y repostería', 'ud', P, 365],
   ['Maicena', '🌾', 'Harinas y repostería', 'ud', P, 730], ['Chocolate para fundir', '🍫', 'Harinas y repostería', 'ud', P, 365],
   // Aceites y vinagres
-  ['Aceite de oliva', '🫒', 'Aceites y vinagres', 'ud', P, 540], ['Aceite de girasol', '🌻', 'Aceites y vinagres', 'ud', P, 365], ['Vinagre', '🍶', 'Aceites y vinagres', 'ud', P, 1095],
+  ['Aceite de oliva', '🫒', 'Aceites y vinagres', 'ud', P, 540, 'aceite'], ['Aceite de girasol', '🌻', 'Aceites y vinagres', 'ud', P, 365], ['Vinagre', '🍶', 'Aceites y vinagres', 'ud', P, 1095],
   // Especias y condimentos
-  ['Sal', '🧂', 'Especias y condimentos', 'ud', P, 1825], ['Pimienta negra', '🧂', 'Especias y condimentos', 'ud', P, 730], ['Pimentón dulce', '🌶️', 'Especias y condimentos', 'ud', P, 365],
-  ['Comino', '🌿', 'Especias y condimentos', 'ud', P, 730], ['Orégano', '🌿', 'Especias y condimentos', 'ud', P, 730], ['Canela', '🌿', 'Especias y condimentos', 'ud', P, 730],
-  ['Laurel', '🌿', 'Especias y condimentos', 'ud', P, 730], ['Ajo en polvo', '🧄', 'Especias y condimentos', 'ud', P, 730], ['Curry', '🌶️', 'Especias y condimentos', 'ud', P, 730],
-  ['Caldo en pastillas', '🧂', 'Especias y condimentos', 'ud', P, 730], ['Caldo de pollo', '🍲', 'Especias y condimentos', 'ud', P, 365],
+  ['Sal', '🧂', 'Especias y condimentos', 'ud', P, 1825], ['Pimienta negra molida', '⚫', 'Chiles y pimientas', 'ud', P, 730, 'pimienta negra|pimienta'], ['Pimentón dulce', '🌶️', 'Especias y condimentos', 'ud', P, 365],
+  ['Comino molido', '🌱', 'Especias y condimentos', 'ud', P, 730, 'comino|cumin'], ['Orégano', '🌿', 'Hierbas secas', 'ud', P, 365, 'oregano'], ['Canela molida', '🪵', 'Especias y condimentos', 'ud', P, 730, 'canela|cinnamon'],
+  ['Laurel', '🍃', 'Hierbas secas', 'ud', P, 365, 'hojas de laurel'], ['Ajo en polvo', '🧄', 'Especias y condimentos', 'ud', P, 730], ['Curry en polvo', '🍛', 'Mezclas de especias', 'ud', P, 540, 'curry|curri'],
+  ['Caldo en pastillas', '🧂', 'Caldos y fondos', 'ud', P, 730, 'avecrem|pastillas de caldo'], ['Caldo de pollo', '🍲', 'Caldos y fondos', 'ud', P, 365],
   // Salsas
   ['Tomate frito', '🍅', 'Salsas', 'ud', P, 365], ['Mayonesa', '🫙', 'Salsas', 'ud', P, 180], ['Ketchup', '🍅', 'Salsas', 'ud', P, 180],
-  ['Mostaza', '🫙', 'Salsas', 'ud', P, 365], ['Salsa de soja', '🫙', 'Salsas', 'ud', P, 730], ['Pesto', '🌿', 'Salsas', 'ud', N, 90],
+  ['Mostaza', '🫙', 'Salsas', 'ud', P, 365], ['Salsa de soja', '🥢', 'Salsas asiáticas', 'ud', P, 730, 'soja|soy sauce|shoyu'], ['Pesto', '🌿', 'Salsas', 'ud', N, 90],
   // Café e infusiones
   ['Café molido', '☕', 'Café e infusiones', 'ud', P, 365], ['Café en cápsulas', '☕', 'Café e infusiones', 'ud', P, 365], ['Té', '🍵', 'Café e infusiones', 'ud', P, 730],
   ['Manzanilla', '🍵', 'Café e infusiones', 'ud', P, 730],
@@ -93,5 +94,8 @@ const RAW = [
   ['Gazpacho', '🍅', 'Platos preparados', 'ud', N, 30], ['Hummus', '🫘', 'Platos preparados', 'ud', N, 10], ['Tortilla de patatas', '🍳', 'Platos preparados', 'ud', N, 5],
 ];
 
-export const BASICOS = RAW.map(([name, symbol, sub, unit, storage, days]) => ({ name, symbol, sub, unit, storage, days }));
+export const BASICOS = [...RAW, ...ESPECIAS].map(([name, symbol, sub, unit, storage, days, aliases]) => ({
+  name, symbol, sub, unit, storage, days, aliases: aliases ? aliases.split('|') : [],
+  pack: ESPECIAS.some((e) => e[0] === name) ? 'especias' : 'basicos',
+}));
 export const STORAGE_NAMES = { despensa: 'Despensa', nevera: 'Nevera', congelador: 'Congelador' };

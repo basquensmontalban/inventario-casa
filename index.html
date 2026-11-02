@@ -326,6 +326,115 @@
     .db-have { font-size: 11px; color: var(--accent); }
     .sticky-bottom { position: sticky; bottom: 0; margin-top: 14px; box-shadow: 0 -6px 16px var(--bg); }
 
+    /* Apuntar en la lista */
+    .qa { position: sticky; top: calc(62px + env(safe-area-inset-top)); z-index: 15; background: var(--bg); padding: 4px 0 6px; margin: -4px 0 4px; }
+    .qa-box { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+    .qa-box .ic { color: var(--accent); }
+    .qa-box input::-webkit-search-cancel-button { -webkit-appearance: none; appearance: none; display: none; }
+    .qa-sugg { display: grid; gap: 4px; margin-top: 6px; }
+    .qa-sugg:empty { display: none; }
+    .qa-item { display: flex; align-items: center; gap: 10px; width: 100%; text-align: left; border: 1px solid var(--line); background: var(--card); border-radius: 12px; padding: 8px 10px; min-height: 52px; }
+    .qa-item:first-child { border-color: var(--accent); }
+    .qa-sym { font-size: 24px; width: 32px; text-align: center; flex: none; }
+    .qa-name { display: block; font-weight: 600; }
+    .qa-sub { display: block; color: var(--muted); font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .qa-plus { font-size: 26px; font-weight: 300; color: var(--accent); width: 28px; text-align: center; flex: none; }
+    .isym { margin-right: 6px; }
+    .cat-h { font-size: 13px; font-weight: 700; color: var(--muted); margin: 8px 2px 0; }
+    .cat-h:first-child { margin-top: 0; }
+
+    /* v1.7 · Lista: notas, cantidades, carro y sugerencias */
+    .row-note { font-size: 13px; color: var(--ink); opacity: .8; font-style: italic; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .row-main.plain { border: 0; background: none; padding: 0; text-align: left; color: inherit; font: inherit; }
+    .mini-step { display: flex; align-items: center; gap: 2px; flex: none; }
+    .mini-step button { width: 30px; height: 30px; border-radius: 9px; border: 1px solid var(--line); background: var(--bg); font-size: 18px; line-height: 1; padding: 0; color: var(--ink); }
+    .mini-step b { min-width: 30px; text-align: center; font-size: 14px; white-space: nowrap; }
+    .sugg { margin: 4px 0 2px; }
+    .sugg .chips { padding-top: 6px; }
+    .sugg-chip.due { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+    .cart-banner { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
+    .small-link { padding: 0 0 0 6px; font-size: 12px; }
+    .aisle-n { width: 26px; height: 26px; border-radius: 50%; background: var(--line); color: var(--muted); display: grid; place-items: center; font-size: 13px; font-weight: 700; flex: none; }
+    .row.aisle { padding-top: 6px; padding-bottom: 6px; gap: 6px; }
+    .finished-btn { color: var(--bad); }
+    .hero.contain { object-fit: contain; background: #fff; }
+    .off-card { display: flex; gap: 12px; align-items: center; background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 10px; margin: 8px 0; }
+    .off-card img { width: 64px; height: 64px; object-fit: contain; border-radius: 8px; background: #fff; flex: none; }
+    .off-card .muted { font-size: 13px; }
+
+    /* Guardar la compra */
+    .stock-in { padding-top: 10px; }
+    .si-head { display: grid; gap: 2px; margin-bottom: 2px; }
+    .grid2 { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 8px; }
+    .grid2 > * { min-width: 0; }
+    .grid2 .inp { min-width: 0; max-width: 100%; }
+
+    /* Modo súper */
+    body.super-open { overflow: hidden; }
+    .super { position: fixed; inset: 0; z-index: 45; background: var(--bg); overflow-y: auto; -webkit-overflow-scrolling: touch; }
+    .super-body { max-width: 640px; margin: 0 auto; padding: 0 14px calc(40px + env(safe-area-inset-bottom)); }
+    .super-top { position: sticky; top: 0; z-index: 2; background: var(--bg); display: flex; align-items: center; gap: 10px; padding: calc(12px + env(safe-area-inset-top)) 0 8px; }
+    .super-title { flex: 1; min-width: 0; display: grid; }
+    .super-title b { font-size: 20px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .super-title small { color: var(--muted); font-size: 14px; }
+    .progress { height: 8px; border-radius: 4px; background: var(--line); overflow: hidden; margin: 2px 0 4px; }
+    .progress span { display: block; height: 100%; background: var(--accent); border-radius: 4px; transition: width .3s; }
+    .super .qa { position: static; margin: 6px 0 4px; }
+    .slist { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; margin-top: 6px; }
+    .srow { display: flex; align-items: stretch; gap: 6px; min-width: 0; }
+    .srow-main { flex: 1; min-width: 0; display: flex; align-items: center; gap: 12px; text-align: left; background: var(--card); border: 1px solid var(--line); border-radius: var(--r); padding: 10px 12px; min-height: 60px; color: var(--ink); box-shadow: var(--shadow); }
+    .srow-main:active { background: var(--accent-soft); }
+    .scheck { width: 30px; height: 30px; border-radius: 50%; border: 2px solid var(--accent); display: grid; place-items: center; flex: none; font-weight: 800; color: var(--accent-ink); }
+    .srow.done .scheck { background: var(--accent); }
+    .srow.done .srow-main { opacity: .55; box-shadow: none; }
+    .srow.done .sname { text-decoration: line-through; }
+    .ssym { font-size: 24px; width: 30px; text-align: center; flex: none; }
+    .ssym:empty { display: none; }
+    .sname { flex: 1; min-width: 0; font-weight: 600; font-size: 17px; overflow-wrap: anywhere; }
+    .sname small { display: block; font-weight: 400; font-size: 13px; color: var(--muted); font-style: italic; }
+    .sqty { color: var(--muted); font-size: 15px; white-space: nowrap; flex: none; }
+    .sstep { display: grid; grid-template-rows: 1fr 1fr; gap: 4px; flex: none; }
+    .sstep button { width: 40px; border-radius: 10px; border: 1px solid var(--line); background: var(--card); font-size: 20px; line-height: 1; padding: 0; color: var(--ink); }
+    .super.big .srow-main { min-height: 72px; }
+    .super.big .sname { font-size: 21px; }
+    .super.big .sqty { font-size: 18px; }
+    .super.big .ssym { font-size: 30px; width: 36px; }
+    .super.big .scheck { width: 36px; height: 36px; }
+    .super .cat-h { font-size: 14px; margin-top: 10px; }
+
+    /* Menú semanal */
+    .top-seg { margin: 0 0 10px; }
+    .week-nav { display: flex; align-items: center; gap: 6px; }
+    .week-nav .icon-btn { font-size: 26px; line-height: 1; }
+    .week-title { flex: 1; display: grid; justify-items: center; text-align: center; }
+    .week-title b { font-size: 17px; }
+    .week-title small { color: var(--muted); font-size: 13px; }
+    .week-title .linkbtn { padding: 0; font-size: 13px; }
+    .week { display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; margin-top: 10px; }
+    .day { background: var(--card); border: 1px solid var(--line); border-radius: var(--r); padding: 8px 10px 10px; min-width: 0; }
+    .day.today { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }
+    .day.past { opacity: .6; }
+    .day-h { display: flex; align-items: baseline; justify-content: space-between; margin: 0 2px 6px; }
+    .day-h small { color: var(--muted); }
+    .meal { display: flex; align-items: center; gap: 10px; width: 100%; min-width: 0; text-align: left; border: 0; border-top: 1px solid var(--line); background: none; padding: 9px 2px; color: var(--ink); }
+    .meal:first-of-type { border-top: 0; }
+    .meal-slot { width: 74px; flex: none; font-size: 13px; color: var(--muted); font-weight: 600; }
+    .meal-main { flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+    .meal-main small { color: var(--muted); font-size: 12px; }
+    .meal-name { font-weight: 600; overflow-wrap: anywhere; }
+    .meal-add { color: var(--accent); font-size: 14px; }
+    .meal-done { width: 18px; height: 18px; border-radius: 50%; background: var(--accent); color: var(--accent-ink); display: grid; place-items: center; font-size: 11px; font-weight: 800; flex: none; }
+    .chosen { display: flex; align-items: center; justify-content: space-between; gap: 8px; background: var(--accent-soft); color: var(--accent); border-radius: 10px; padding: 6px 12px; margin-bottom: 8px; }
+    .chosen b { overflow-wrap: anywhere; }
+    .rec-pick { max-height: 38vh; overflow-y: auto; margin: 8px 0; }
+    .rec-pick .row { padding-top: 8px; padding-bottom: 8px; }
+    .rec-pick .row.sel { border-color: var(--accent); background: var(--accent-soft); }
+    .menu-pick { display: grid; gap: 8px; }
+    .mp-day { display: grid; gap: 4px; }
+    .mp-slots { display: flex; flex-wrap: wrap; gap: 6px; }
+    .chip.busy { color: var(--muted); }
+    @media (min-width: 560px) { .week { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); } }
+
     /* Escáner */
     .scanner { position: fixed; inset: 0; z-index: 90; background: #000; color: #fff; display: flex; flex-direction: column; }
     .scanner-top { display: flex; align-items: center; justify-content: space-between; padding: calc(10px + env(safe-area-inset-top)) 12px 10px 18px; font-weight: 600; }
@@ -348,8 +457,8 @@
   <button id="fabAdd" class="fab"></button>
 
   <nav class="tabbar">
-    <button class="tab" data-tab="inv"></button>
     <button class="tab" data-tab="shop"></button>
+    <button class="tab" data-tab="inv"></button>
     <button class="scan-btn" id="btnScan" aria-label="Escanear"></button>
     <button class="tab" data-tab="recipes"></button>
     <button class="tab" data-tab="stores"></button>

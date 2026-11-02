@@ -7,8 +7,9 @@ import { photoSet, photoDel } from './db.js';
 import {
   h, icon, badge, field, inp, select, toggle, numInput, num, openSheet, toast, copyText, pickFile, resizeImage, hue, nav,
 } from './ui.js';
+import { renderMenu, addToMenuSheet } from './menu.js';
 
-const ui = { q: '', avail: '', time: '', ing: '', groups: {}, sort: null };
+const ui = { q: '', avail: '', time: '', ing: '', groups: {}, sort: null, mode: 'recipes' };
 const status = (r) => st.recipeStatus(r, +D.recOrangeMax || 2);
 
 // ── Unidades de los ingredientes ──
@@ -62,11 +63,21 @@ function matches(r, q) {
 }
 
 export function renderRecipes(m) {
-  if (m.dataset.view !== 'recipes') {
-    m.dataset.view = 'recipes';
+  const view = 'recipes-' + ui.mode;
+  if (m.dataset.view !== view) {
+    m.dataset.view = view;
+    const seg = h('div', { class: 'seg top-seg' },
+      h('button', { class: ui.mode === 'recipes' ? 'on' : '', onclick: () => { ui.mode = 'recipes'; renderRecipes(m); } }, '🍲 Recetas'),
+      h('button', { class: ui.mode === 'menu' ? 'on' : '', onclick: () => { ui.mode = 'menu'; renderRecipes(m); } }, '📅 Menú semanal'));
+    if (ui.mode === 'menu') {
+      m.replaceChildren(seg, h('div', { id: 'menuBox' }));
+      renderMenu($('#menuBox'));
+      return;
+    }
     const search = h('input', { type: 'search', placeholder: 'Buscar receta o ingrediente…', value: ui.q, enterkeyhint: 'search' });
     search.addEventListener('input', () => { ui.q = search.value; renderList(); });
     m.replaceChildren(
+      seg,
       h('div', { class: 'search' }, icon('search'), search),
       h('div', { class: 'chips', id: 'recChips' }),
       h('div', { class: 'toolbar' },
@@ -76,7 +87,7 @@ export function renderRecipes(m) {
       h('div', { class: 'list', id: 'recList' }),
     );
   }
-  renderList();
+  if (ui.mode === 'menu') renderMenu($('#menuBox')); else renderList();
 }
 
 function chipSelect(opts, value, set) {
@@ -183,6 +194,7 @@ export function openRecipe(id) {
     out.push(h('div', { class: 'actions two' },
       h('button', { class: 'btn primary', onclick: () => toListSheet(id, factor) }, icon('cart'), 'A la lista'),
       h('button', { class: 'btn', onclick: () => cookSheet(id, factor) }, '🍳 La he cocinado')));
+    out.push(h('button', { class: 'btn block', onclick: () => addToMenuSheet(id) }, '📅 Añadir al menú semanal'));
 
     if ((r.steps || []).length) {
       out.push(h('h3', {}, 'Preparación'), h('ol', { class: 'steps' }, r.steps.map((x) => h('li', {}, x))));
@@ -291,7 +303,7 @@ function toListSheet(id, factor) {
 }
 
 // ── Cocinar: descontar del inventario ──
-function cookSheet(id, factor) {
+export function cookSheet(id, factor, onDone) {
   const r = S.recipes[id];
   const rows = (r.ingredients || []).map((ing) => ({ ing, s: st.ingredientState(ing, factor) })).filter((x) => x.s.p);
   const inputs = rows.map(({ ing, s }) => {
@@ -312,6 +324,7 @@ function cookSheet(id, factor) {
         if (inputs[k].cb.checked && q > 0) { st.consume(S.products[s.p.id], q); n++; }
       });
       sh.close();
+      if (onDone) onDone();
       toast(n ? `Descontados ${n} ingredientes. ¡Que aproveche!` : 'No se ha descontado nada');
     } }, 'Descontar del inventario') : null,
   ]);

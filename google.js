@@ -2,7 +2,7 @@
 import { CONFIG } from './config.js';
 import * as st from './store.js';
 import { photoGet, photoSet } from './db.js';
-import { runBackups } from './backup.js';
+import { runBackups, backupDue } from './backup.js';
 
 export const DRIVE = 'https://www.googleapis.com/drive/v3';
 export const DRIVE_UP = 'https://www.googleapis.com/upload/drive/v3';
@@ -131,8 +131,11 @@ function setStatus(s, error = null) {
 }
 
 // ── Drive ──
+let folderCheckedAt = 0;
 export async function ensureFolder() {
   const m = st.meta;
+  if (m.folderId && Date.now() - folderCheckedAt < 10 * 60e3) return m.folderId;
+  folderCheckedAt = Date.now();
   if (m.folderId) {
     try {
       const f = await api(`${DRIVE}/files/${m.folderId}?fields=id,trashed`);
@@ -201,11 +204,32 @@ async function doSync() {
     await uploadPhotos(folder);
 
     if (!m.fileId) m.fileId = await findOne(`name='${STATE_FILE}' and '${folder}' in parents and trashed=false`);
+    // Comprobación rápida: si no ha cambiado nada aquí ni en Drive, no se descarga nada.
+    let md5 = null;
+    if (m.fileId) {
+      try {
+        const f = await api(`${DRIVE}/files/${m.fileId}?fields=md5Checksum,trashed`);
+        if (f.trashed) m.fileId = null; else md5 = f.md5Checksum || null;
+      } catch (e) {
+        if (e.status === 404) m.fileId = null; else throw e;
+      }
+    }
+    const want = st.desiredAlerts();
+    const calSig = alertsSig(want);
+    const calNeeded = (want.length || st.S.settings.calendarId) && (calSig !== m.calSig || Date.now() - (m.calAt || 0) > 6 * 3600e3);
+    if (md5 && md5 === m.remoteMd5 && !m.dirty && !backupDue() && !calNeeded) {
+      m.lastSync = Date.now();
+      await st.saveMeta();
+      setStatus('ok');
+      return;
+    }
+
     let remote = null;
     if (m.fileId) {
       try {
         remote = await api(`${DRIVE}/files/${m.fileId}?alt=media`);
         if (typeof remote === 'string') remote = JSON.parse(remote);
+        m.remoteMd5 = md5;
       } catch (e) {
         if (e.status === 404) m.fileId = null;
         else throw e;
@@ -218,7 +242,7 @@ async function doSync() {
     let calId = null;
     let calError = null;
     try {
-      if (st.desiredAlerts().length || st.S.settings.calendarId) calId = await ensureCalendar();
+      if (calNeeded) calId = await ensureCalendar();
     } catch (e) {
       if (e instanceof AuthError) throw e;
       calError = e.message;
@@ -238,22 +262,25 @@ async function doSync() {
     if (st.newerThan(remote)) {
       const body = JSON.stringify(st.S);
       if (m.fileId) {
-        await api(`${DRIVE_UP}/files/${m.fileId}?uploadType=media`, {
+        const r = await api(`${DRIVE_UP}/files/${m.fileId}?uploadType=media&fields=md5Checksum`, {
           method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body,
         });
+        m.remoteMd5 = r?.md5Checksum || null;
       } else {
         const f = await multipartCreate(
           { name: STATE_FILE, parents: [folder], mimeType: 'application/json' },
           new Blob([body], { type: 'application/json' }),
+          'id,md5Checksum',
         );
         m.fileId = f.id;
+        m.remoteMd5 = f.md5Checksum || null;
       }
     }
     m.lastSync = Date.now();
     st.commit({ local: false });
 
     try {
-      if (calId) await syncCalendar(calId);
+      if (calId) { await syncCalendar(calId); m.calSig = calSig; m.calAt = Date.now(); }
       m.calError = calError;
     } catch (e) {
       if (e instanceof AuthError) throw e;
@@ -298,6 +325,11 @@ function eventBody(w) {
     reminders: { useDefault: false, overrides: [{ method: 'popup', minutes: 0 }] },
     extendedProperties: { private: { invcasa: w.key } },
   };
+}
+
+// Huella de los avisos: si no cambia, no hace falta tocar el calendario.
+function alertsSig(want) {
+  return JSON.stringify(want.map((w) => [w.key, w.summary, w.description, w.flexible ? 0 : w.start.getTime()]));
 }
 
 const evStart = (ev) => new Date(ev.start?.dateTime || ev.start?.date).getTime();

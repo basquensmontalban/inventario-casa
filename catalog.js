@@ -77,11 +77,14 @@ export function editCatalog(kind, { id = null, name: preName = '', parentId = nu
         if ((parentSel.value || null) !== (r.parentId || null)) delete r.order;
         r.parentId = parentSel.value || null;
       }
+      if (!isNew && S[kind][r.id]?.aisles) r.aisles = S[kind][r.id].aisles;
       st.putCatalog(kind, r);
       s.close();
       toast(isNew ? `«${nm}» creada` : 'Guardado');
       onSaved?.(r.id);
     } }, icon('check'), 'Guardar'),
+    !isNew && kind === 'stores' ? h('button', { class: 'btn block', onclick: () => openAisles(r.id) }, '🧭 Orden de pasillos de esta tienda',
+      r.aisles?.length ? h('small', { class: 'muted' }, ' (personalizado)') : null) : null,
     !isNew ? h('div', { class: 'btn-row' },
       h('button', { class: 'btn small', onclick: () => st.moveCatalogOrder(kind, r.id, -1) }, '↑ Subir'),
       h('button', { class: 'btn small', onclick: () => st.moveCatalogOrder(kind, r.id, 1) }, '↓ Bajar')) : null,
@@ -142,4 +145,40 @@ export function catalogPicker(kind, selected = []) {
   box.set = (ids) => { box.value = [...ids]; draw(); };
   draw();
   return box;
+}
+
+// ── Orden de pasillos de una tienda: en qué orden aparecen las categorías al comprar allí ──
+function aisleCats() {
+  return st.tags().filter((t) => st.tagDepth(t) === 1 || !st.tagChildren(t.id).length);
+}
+export function openAisles(storeId) {
+  const store = S.stores[storeId];
+  const all = aisleCats();
+  const ids = new Set(all.map((t) => t.id));
+  let order = [...(store.aisles || []).filter((id) => ids.has(id)), ...all.map((t) => t.id).filter((id) => !(store.aisles || []).includes(id))];
+  const move = (i, j) => { if (j < 0 || j >= order.length) return; const [x] = order.splice(i, 1); order.splice(j, 0, x); s.refresh(); };
+  const s = openSheet('Pasillos de ' + store.name, () => [
+    h('p', { class: 'muted' }, 'Ordena las categorías como las vas encontrando en esta tienda. Al filtrar la compra por esta tienda (o en el modo súper), la lista sale en este orden.'),
+    h('div', { class: 'list' }, order.map((id, i) => {
+      const t = st.getTag(id);
+      return h('div', { class: 'row aisle' },
+        h('span', { class: 'aisle-n' }, i + 1),
+        h('div', { class: 'row-main' }, h('div', { class: 'row-title' }, `${t.symbol || ''} ${t.name}`)),
+        h('button', { class: 'icon-btn', 'aria-label': 'Al principio', onclick: () => move(i, 0) }, '⤒'),
+        h('button', { class: 'icon-btn', 'aria-label': 'Subir', onclick: () => move(i, i - 1) }, '↑'),
+        h('button', { class: 'icon-btn', 'aria-label': 'Bajar', onclick: () => move(i, i + 1) }, '↓'));
+    })),
+    h('button', { class: 'btn primary block sticky-bottom', onclick: () => {
+      st.putCatalog('stores', { ...st.clone(S.stores[storeId]), aisles: order });
+      s.close();
+      toast('Orden de pasillos guardado');
+    } }, 'Guardar orden'),
+    store.aisles?.length ? h('button', { class: 'btn block', onclick: () => {
+      const rec = st.clone(S.stores[storeId]);
+      delete rec.aisles;
+      st.putCatalog('stores', rec);
+      s.close();
+      toast('Vuelve al orden general');
+    } }, 'Usar el orden general') : null,
+  ]);
 }
