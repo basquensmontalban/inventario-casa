@@ -39,7 +39,7 @@ export const DEFAULTS = {
   // Recetas
   recOrangeMax: 2,            // naranja si faltan como mucho N ingredientes
   recSort: 'avail',           // avail | name | time
-  recFilters: { avail: true, time: true, ing: true, fav: true, sort: true },
+  recFilters: { avail: true, time: true, ing: true, fav: true, health: true, rating: true, freeze: true, fridge: true, sort: true },
   recHiddenGroups: [],        // grupos de filtros que no se muestran
   recServings: 2,
   recListId: '',

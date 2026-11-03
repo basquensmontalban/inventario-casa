@@ -3,8 +3,8 @@ import { kvGet, kvSet } from './db.js';
 
 export const GENERAL = 'general';
 export const UNITS = { ud: 'ud.', kg: 'kg', g: 'g', l: 'l', ml: 'ml' };
-export const SCHEMA = 7;
-const COLLECTIONS = ['products', 'lists', 'items', 'locations', 'tags', 'stores', 'recipes', 'recipeGroups', 'menu', 'freq', 'people', 'recipeFavs'];
+export const SCHEMA = 8;
+const COLLECTIONS = ['products', 'lists', 'items', 'locations', 'tags', 'stores', 'recipes', 'recipeGroups', 'menu', 'freq', 'people', 'recipeFavs', 'recipeRatings'];
 
 export const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 const now = () => Date.now();
@@ -37,6 +37,7 @@ function emptyState() {
     freq: {},
     people: {},
     recipeFavs: {},
+    recipeRatings: {},
     settings: { ...DEFAULT_SETTINGS },
     backupInfo: { last: 0, by: '', u: 0 },
   };
@@ -79,6 +80,8 @@ function normalize() {
   if (!Object.keys(S.recipeGroups).length) seedRecipeGroups();
   // v1.8: filtro «Tipo de plato» (si se borra, no vuelve).
   if (!S.recipeGroups[COURSE_GROUP]) seedGroup(RG_COURSE, -1);
+  // v1.9: filtro «Proteína» (para la variedad de la semana).
+  if (!S.recipeGroups[PROTEIN_GROUP]) seedGroup(RG_PROTEIN, -0.5);
   for (const p of Object.values(S.products)) {
     if (p.del) continue;
     if ('room' in p || 'furniture' in p || 'shelf' in p) {
@@ -107,6 +110,8 @@ function normalize() {
 
 export const COURSE_GROUP = 'rg-plato';
 const RG_COURSE = [COURSE_GROUP, 'Tipo de plato', true, ['Desayuno', 'Entrante', 'Primero', 'Plato principal', 'Postre', 'Salsa']];
+export const PROTEIN_GROUP = 'rg-proteina';
+const RG_PROTEIN = [PROTEIN_GROUP, 'Proteína', true, ['Legumbres', 'Pescado blanco', 'Pescado azul', 'Marisco', 'Ave', 'Carne roja', 'Huevo', 'Proteína vegetal']];
 const RG_SEEDS = [
   ['rg-momento', 'Momento', true, ['Desayuno', 'Comida', 'Cena', 'Merienda', 'Picoteo']],
   ['rg-tipo', 'Tipo', false, ['Ligero', 'Pesado']],
@@ -180,6 +185,7 @@ export async function flush() { await kvSet('state', S); await saveMeta(); }
 
 // Guarda y avisa a la interfaz. local=true marca que hay cambios por subir.
 export function commit({ local = true } = {}) {
+  linkCache = null;
   if (local) meta.dirty = true;
   refreshAuto();
   kvSet('state', S);
@@ -558,6 +564,7 @@ export function refreshAuto() {
 // ── Fusión con la copia de Drive (gana el cambio más reciente de cada registro) ──
 export function merge(remote) {
   if (!remote) return false;
+  linkCache = null;
   let changed = false;
   for (const k of COLLECTIONS) {
     for (const [id, rv] of Object.entries(remote[k] || {})) {
@@ -698,10 +705,32 @@ export function convertQty(qty, from, to) {
   return round((+qty * a[1]) / b[1]);
 }
 
+// Artículo del inventario que corresponde a un nombre (igual, o todas las palabras del artículo en el nombre).
+const lw = (s) => norm(s).split(/[^a-z0-9ñ]+/).filter(Boolean);
+export function guessProduct(name) {
+  const w = new Set(lw(name));
+  const ps = alive(S.products);
+  const exact = ps.find((p) => norm(p.name) === norm(name));
+  if (exact) return exact.id;
+  const cands = ps.filter((p) => { const pw = lw(p.name); return pw.length && pw.every((x) => w.has(x)); });
+  cands.sort((a, b) => lw(b.name).length - lw(a.name).length);
+  return cands[0]?.id || null;
+}
+let linkCache = null;
+// Si un ingrediente no se vinculó a mano, se busca su artículo cada vez (así, al comprarlo, la receta lo ve).
+function linkedProduct(ing) {
+  if (ing.productId && S.products[ing.productId] && !S.products[ing.productId].del) return S.products[ing.productId];
+  if (ing.productIdManual) return null;
+  if (!linkCache) linkCache = new Map();
+  const k = norm(ing.name);
+  if (!linkCache.has(k)) linkCache.set(k, guessProduct(ing.name));
+  const id = linkCache.get(k);
+  return id ? S.products[id] : null;
+}
 // Estado de un ingrediente según lo que hay A MANO (la reserva no cuenta).
 export function ingredientState(ing, factor = 1) {
   if (ing.basic) return { state: 'basic' };
-  const p = ing.productId && S.products[ing.productId] && !S.products[ing.productId].del ? S.products[ing.productId] : null;
+  const p = linkedProduct(ing);
   const opt = !!ing.optional;
   if (!p) return { state: 'missing', unlinked: true, optional: opt };
   const have = atHand(p);
@@ -710,14 +739,30 @@ export function ingredientState(ing, factor = 1) {
   if (need !== null && have < need) return { state: 'short', p, have, need, optional: opt, reserve: inReserve(p) };
   return { state: 'ok', p, have, need, optional: opt };
 }
-// ok = lo tienes todo · few = faltan pocos (hasta orangeMax) · many = faltan más (sin contar opcionales ni básicos)
-export function recipeStatus(r, orangeMax = 2) {
-  const missing = (r.ingredients || []).filter((ing) => {
-    const s = ingredientState(ing);
-    return (s.state === 'missing' || s.state === 'short') && !s.optional;
-  });
-  const n = missing.length;
-  return { n, missing, level: n === 0 ? 'ok' : n <= orangeMax ? 'few' : 'many' };
+// Colores de una receta: rojo si falta algún imprescindible; amarillo si faltan la mitad o más
+// de los recomendados; verde en los demás casos. Los básicos (sal, agua…) no cuentan.
+export function recipeStatus(r) {
+  const ings = (r.ingredients || []).filter((i) => !i.basic);
+  const ess = ings.filter((i) => !i.optional);
+  const rec = ings.filter((i) => i.optional);
+  const miss = (i) => { const s = ingredientState(i); return s.state === 'missing' || s.state === 'short'; };
+  const missing = ess.filter(miss);
+  const missingRec = rec.filter(miss);
+  const level = missing.length ? 'many' : rec.length && missingRec.length * 2 >= rec.length ? 'few' : 'ok';
+  return { n: missing.length, missing, missingRec, nRec: rec.length, level };
+}
+
+// ── Notas de 0 a 10 de cada persona (o de la casa si no hay personas) ──
+const rateKey = (rid, pid) => `${rid}|${pid}`;
+export const rating = (rid, pid) => { const x = S.recipeRatings[rateKey(rid, pid)]; return x && !x.del ? x.value : null; };
+export function setRating(rid, pid, value) {
+  const id = rateKey(rid, pid);
+  S.recipeRatings[id] = value === null || value === undefined ? { id, del: true, u: now() } : { id, recipeId: rid, personId: pid, value: +value, u: now() };
+  commit();
+}
+export function ratingAvg(rid) {
+  const vs = alive(S.recipeRatings).filter((x) => x.recipeId === rid && (x.personId === 'casa' || (S.people[x.personId] && !S.people[x.personId].del))).map((x) => +x.value);
+  return vs.length ? Math.round((vs.reduce((a, b) => a + b, 0) / vs.length) * 10) / 10 : null;
 }
 
 // ── Lo que más compráis: cuántas veces y cuándo se ha comprado cada cosa ──

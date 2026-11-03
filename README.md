@@ -129,6 +129,9 @@ En Recetas › «✨ Ideas con lo que tengo» se genera un texto con lo que hay 
 - **A la lista**: añade solo lo que falta o todos los ingredientes (puedes desmarcar).
 - **La he cocinado**: descuenta del inventario lo usado.
 - **Filtros**: disponibilidad, tiempo, ingrediente, «Tipo de plato» (desayuno, entrante, primero, plato principal, postre, salsa), «Momento» (desayuno, comida, cena…), «Tipo» (ligero/pesado), favoritas y los que crees en «⚙ Filtros de recetas».
+- **Imprescindibles y recomendados**: la receta sale en 🔴 rojo si falta algún imprescindible, en 🟡 amarillo si tienes lo imprescindible pero faltan la mitad o más de los recomendados, y en 🟢 verde en los demás casos. Si un ingrediente no se vinculó a mano, la app lo busca en el inventario por el nombre cada vez.
+- **Ficha completa**: consejos clave, salsas y aderezos que le van bien, conservación (si se congela y cuánto, días en nevera, horas sin refrigerar) y nota de 0 a 10 de cada uno.
+- **Nutrición y salud**: kcal, proteína, hidratos, grasas y fibra por ración, calculados a partir de los ingredientes con una tabla de composición (estimación), y una puntuación de salud de 0 a 100 con el criterio del recetario: S = máx(0, proteína y fibra (30) + carga glucémica (25) + grasas (25) + vitaminas y minerales (20) − sodio/potasio y cocción a más de 180 °C). Toca la puntuación para ver el desglose.
 - **Favoritas con nombre**: en Ajustes › «Quiénes sois» (o desde cualquier receta) ponéis vuestros nombres. En cada receta, cada uno marca la suya con ❤️ y los dos veis las de los dos.
 - **Organizar**: disponibles primero, orden alfabético, más rápidas, **por tipo de plato** (con apartados) o **por favoritas** (de todos, de cada uno y las demás).
 
@@ -139,6 +142,7 @@ En Recetas › «📅 Menú semanal»: cada día tiene comida y cena (también d
 - **🛒 Lista de la semana**: suma los ingredientes de todas las recetas (ajustados a las raciones), resta lo que tenéis a mano (sin la reserva) y apunta solo lo que falta. Lo no vinculado al inventario se suma por nombre. Las comidas ya cocinadas no cuentan.
 - **La hemos cocinado**: descuenta los ingredientes y marca la comida con ✓.
 - **Copiar menú**: texto listo para WhatsApp.
+- **Balance del día y de la semana**: cada día con platos muestra una nota de 0 a 100 (toca para ver el detalle): 40 % la salud media de los platos y 60 % el reparto (proteína, hidratos y grasas en % de la energía, grasas saturadas, fibra y sal por cada 1000 kcal). La semana suma además la variedad (legumbres, pescado y carne roja, según las recomendaciones de la AESAN) cuando hay al menos 8 platos con receta. Cuenta una ración de cada plato por persona y valora proporciones, así que sirve aunque solo planifiquéis comida y cena.
 
 ### Formato de receta para importar
 

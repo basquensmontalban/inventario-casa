@@ -8,9 +8,10 @@ import {
   h, icon, badge, field, inp, select, toggle, numInput, num, openSheet, toast, copyText, pickFile, resizeImage, hue, nav,
 } from './ui.js';
 import { renderMenu, addToMenuSheet } from './menu.js';
+import { recipeNutrition, healthScore, healthLevel, NRV, MICRO_NAMES, fmtG } from './nutri.js';
 
 const ui = { q: '', avail: '', time: '', ing: '', fav: '', groups: {}, sort: null, mode: 'recipes' };
-const status = (r) => st.recipeStatus(r, +D.recOrangeMax || 2);
+const status = (r) => st.recipeStatus(r);
 
 // ── Unidades de los ingredientes ──
 export const ING_UNITS = [
@@ -37,23 +38,24 @@ export function fmtAmount(qty, unit) {
 }
 const fmtMin = (m) => (m >= 60 ? `${Math.floor(m / 60)} h${m % 60 ? ' ' + (m % 60) + ' min' : ''}` : `${m} min`);
 
-const LEVEL = { ok: { cls: 'ok', dot: '🟢' }, few: { cls: 'warn', dot: '🟠' }, many: { cls: 'bad', dot: '🔴' } };
+const LEVEL = { ok: { cls: 'ok', dot: '🟢' }, few: { cls: 'mid', dot: '🟡' }, many: { cls: 'bad', dot: '🔴' } };
 function statusText(stt) {
-  if (!stt.n) return 'Tienes todo';
-  const names = stt.missing.map((i) => i.name).slice(0, 3).join(', ') + (stt.n > 3 ? '…' : '');
-  return `Falta${stt.n > 1 ? 'n' : ''} ${stt.n}: ${names}`;
+  const list = (xs) => xs.map((i) => i.name).slice(0, 3).join(', ') + (xs.length > 3 ? '…' : '');
+  if (stt.n) return `Falta${stt.n > 1 ? 'n' : ''} ${stt.n} imprescindible${stt.n > 1 ? 's' : ''}: ${list(stt.missing)}`;
+  const m = stt.missingRec.length;
+  if (!m) return 'Tienes todo';
+  return `Tienes lo imprescindible · falta${m > 1 ? 'n' : ''} ${m} de ${stt.nRec} recomendados: ${list(stt.missingRec)}`;
 }
+// Datos calculados de una receta (nutrición, salud, nota), para la lista y los filtros.
+const info = (r) => {
+  const n = recipeNutrition(r);
+  const hs = healthScore(n, r.heat);
+  return { n, hs, health: hs ? hs.score : null, rating: st.ratingAvg(r.id) };
+};
+const FREEZE = { si: 'Se puede congelar', parcial: 'Se congela en parte', no: 'No se congela' };
 
 // Vincula un ingrediente con un artículo del inventario por el nombre (todas las palabras del artículo).
-const words = (s) => st.norm(s).split(/[^a-z0-9ñ]+/).filter(Boolean);
-export function guessProduct(name) {
-  const w = new Set(words(name));
-  const exact = st.products().find((p) => st.norm(p.name) === st.norm(name));
-  if (exact) return exact.id;
-  const cands = st.products().filter((p) => { const pw = words(p.name); return pw.length && pw.every((x) => w.has(x)); });
-  cands.sort((a, b) => words(b.name).length - words(a.name).length);
-  return cands[0]?.id || null;
-}
+export const guessProduct = (name) => st.guessProduct(name);
 
 // ── Lista ──
 function matches(r, q) {
@@ -110,7 +112,11 @@ function renderList() {
     .sort((a, b) => a.localeCompare(b, 'es'));
   if (ui.ing && !ingNames.some((n) => st.norm(n) === ui.ing)) ui.ing = '';
   $('#recChips').replaceChildren(...[
-    F.avail ? chipSelect([['', 'Disponibilidad'], ['ok', '🟢 Tengo todo'], ['few', '🟠 Falta poco'], ['many', '🔴 Faltan más']], ui.avail, (v) => { ui.avail = v; }) : null,
+    F.avail ? chipSelect([['', 'Disponibilidad'], ['ok', '🟢 Tengo lo necesario'], ['few', '🟡 Faltan recomendados'], ['many', '🔴 Falta algo imprescindible']], ui.avail, (v) => { ui.avail = v; }) : null,
+    F.health !== false ? chipSelect([['', '💚 Salud'], ['80', '💚 80 o más'], ['65', '💚 65 o más'], ['50', '💚 50 o más']], ui.health || '', (v) => { ui.health = v; }) : null,
+    F.rating !== false ? chipSelect([['', '★ Nota'], ['8', '★ 8 o más'], ['6', '★ 6 o más'], ['none', '★ Sin nota todavía']], ui.rating || '', (v) => { ui.rating = v; }) : null,
+    F.freeze !== false ? chipSelect([['', '❄️ Congelar'], ['si', '❄️ Se puede congelar'], ['parcial', '❄️ En parte'], ['no', '❄️ No se congela']], ui.freeze || '', (v) => { ui.freeze = v; }) : null,
+    F.fridge !== false ? chipSelect([['', '🧊 Nevera'], ['2', '🧊 2 días o más'], ['3', '🧊 3 días o más'], ['4', '🧊 4 días o más']], ui.fridge || '', (v) => { ui.fridge = v; }) : null,
     F.time ? chipSelect([['', 'Cualquier tiempo'], ['15', 'Hasta 15 min'], ['30', 'Hasta 30 min'], ['60', 'Hasta 1 h'], ['61', 'Más de 1 h']], ui.time, (v) => { ui.time = v; }) : null,
     ...groups.map((gr) => chipSelect([['', gr.name], ...gr.options.map((o) => [o.id, o.name])], ui.groups[gr.id] || '', (v) => { ui.groups[gr.id] = v; })),
     F.ing && ingNames.length ? chipSelect([['', 'Ingrediente'], ...ingNames.map((n) => [st.norm(n), n])], ui.ing, (v) => { ui.ing = v; }) : null,
@@ -120,8 +126,12 @@ function renderList() {
   ].filter(Boolean));
 
   const q = st.norm(ui.q);
-  const withSt = all.map((r) => ({ r, s: status(r), min: st.recipeMinutes(r) }));
-  let list = withSt.filter(({ r, s, min }) => matches(r, q)
+  const withSt = all.map((r) => ({ r, s: status(r), min: st.recipeMinutes(r), x: info(r) }));
+  let list = withSt.filter(({ r, s, min, x }) => matches(r, q)
+    && (!ui.health || (x.health ?? -1) >= +ui.health)
+    && (!ui.rating || (ui.rating === 'none' ? x.rating === null : (x.rating ?? -1) >= +ui.rating))
+    && (!ui.freeze || r.freeze === ui.freeze)
+    && (!ui.fridge || (+r.fridgeDays || 0) >= +ui.fridge)
     && (!ui.avail || s.level === ui.avail)
     && (!ui.time || (ui.time === '61' ? min > 60 : min && min <= +ui.time))
     && (!ui.ing || (r.ingredients || []).some((i) => st.norm(i.name) === ui.ing))
@@ -131,6 +141,12 @@ function renderList() {
   if (ui.sort === 'avail') list.sort((a, b) => rank[a.s.level] - rank[b.s.level] || a.s.n - b.s.n || a.r.name.localeCompare(b.r.name, 'es'));
   if (ui.sort === 'time') list.sort((a, b) => (a.min || 1e9) - (b.min || 1e9));
   if (ui.sort === 'fav') list.sort((a, b) => st.favPeople(b.r.id).length - st.favPeople(a.r.id).length || a.r.name.localeCompare(b.r.name, 'es'));
+  const byName = (a, b) => a.r.name.localeCompare(b.r.name, 'es');
+  if (ui.sort === 'health') list.sort((a, b) => (b.x.health ?? -1) - (a.x.health ?? -1) || byName(a, b));
+  if (ui.sort === 'rating') list.sort((a, b) => (b.x.rating ?? -1) - (a.x.rating ?? -1) || byName(a, b));
+  if (ui.sort === 'kcal') list.sort((a, b) => (a.x.n?.kcal ?? 1e9) - (b.x.n?.kcal ?? 1e9) || byName(a, b));
+  if (ui.sort === 'protein') list.sort((a, b) => (b.x.n?.protein ?? -1) - (a.x.n?.protein ?? -1) || byName(a, b));
+  if (ui.sort === 'fridge') list.sort((a, b) => (+b.r.fridgeDays || 0) - (+a.r.fridgeDays || 0) || byName(a, b));
 
   const box = $('#recList');
   if (!all.length) {
@@ -145,7 +161,8 @@ function renderList() {
   }
 }
 
-const SORTS = [['avail', 'Disponibles primero'], ['name', 'Orden alfabético'], ['time', 'Más rápidas'], ['course', 'Por tipo de plato'], ['fav', 'Por favoritas']];
+const SORTS = [['avail', 'Disponibles primero'], ['name', 'Orden alfabético'], ['time', 'Más rápidas'], ['course', 'Por tipo de plato'], ['fav', 'Por favoritas'],
+  ['health', 'Más sanas'], ['rating', 'Mejor nota'], ['kcal', 'Menos calorías'], ['protein', 'Más proteína'], ['fridge', 'Aguantan más en nevera']];
 function favOk(r, people) {
   if (!ui.fav) return true;
   const f = st.favPeople(r.id);
@@ -222,8 +239,8 @@ function recThumb(r, cls = 'thumb') {
   return t;
 }
 
-function catBadges(r) {
-  return st.recipeGroups().flatMap((gr) => (r.cats?.[gr.id] || []).map((oid) => gr.options.find((o) => o.id === oid)?.name).filter(Boolean));
+function catBadges(r, max = 99) {
+  return st.recipeGroups().flatMap((gr) => (r.cats?.[gr.id] || []).map((oid) => gr.options.find((o) => o.id === oid)?.name).filter(Boolean)).slice(0, max);
 }
 
 function recipeCard(r, s, min) {
@@ -233,9 +250,70 @@ function recipeCard(r, s, min) {
     h('div', { class: 'row-main' },
       h('div', { class: 'row-title' }, r.name),
       h('div', { class: 'row-sub' }, [min ? '⏱ ' + fmtMin(min) : null, statusText(s)].filter(Boolean).join(' · ')),
+      cardFacts(r),
       catBadges(r).length || st.favPeople(r.id).length ? h('div', { class: 'badges' },
-        st.favPeople(r.id).map((p) => h('span', { class: 'badge heart' }, '❤️ ' + p.name)), catBadges(r).map((b) => badge(b))) : null),
+        st.favPeople(r.id).map((p) => h('span', { class: 'badge heart' }, '❤️ ' + p.name)), catBadges(r, 2).map((b) => badge(b))) : null),
     h('span', { class: 'dot ' + L.cls }));
+}
+
+function cardFacts(r) {
+  const x = info(r);
+  const parts = [
+    x.health !== null ? h('span', { class: 'fact hs ' + healthLevel(x.health) }, `💚 ${x.health}`) : null,
+    x.rating !== null ? h('span', { class: 'fact' }, `★ ${st.fmtNum(x.rating)}`) : null,
+    x.n ? h('span', { class: 'fact' }, `${Math.round(x.n.kcal)} kcal`) : null,
+    r.freeze ? h('span', { class: 'fact' }, r.freeze === 'no' ? '🚫❄️' : '❄️') : null,
+    r.fridgeDays ? h('span', { class: 'fact' }, `🧊 ${r.fridgeDays} d`) : null,
+  ].filter(Boolean);
+  return parts.length ? h('div', { class: 'facts' }, parts) : null;
+}
+
+// Nota de 0 a 10 de cada persona.
+function rateSheet(rid, pid, who) {
+  const cur = st.rating(rid, pid);
+  const s = openSheet(`Nota de ${who}`, () => [
+    h('div', { class: 'rate-grid' }, [...Array(11)].map((_, v) => h('button', { class: 'rate-btn' + (cur === v ? ' on' : ''), onclick: () => { st.setRating(rid, pid, v); s.close(); } }, v))),
+    cur !== null ? h('button', { class: 'btn block', onclick: () => { st.setRating(rid, pid, null); s.close(); } }, 'Quitar la nota') : null,
+  ]);
+}
+
+function conservation(r) {
+  const rows = [];
+  if (r.freeze) rows.push(['❄️', r.freeze === 'no' ? 'No se congela' : r.freeze === 'parcial' ? 'Se congela en parte' : 'Se puede congelar',
+    [r.freezeMonths ? `hasta ${r.freezeMonths} ${+r.freezeMonths === 1 ? 'mes' : 'meses'}` : null, r.freezeNote].filter(Boolean).join(' · ')]);
+  if (r.fridgeDays) rows.push(['🧊', 'En la nevera', `${r.fridgeDays} día${+r.fridgeDays === 1 ? '' : 's'}`]);
+  if (r.roomHours) rows.push(['🌡️', 'Sin refrigerar', +r.roomHours >= 24 ? `${Math.round(r.roomHours / 24)} días` : `máximo ${r.roomHours} h`]);
+  return rows.length ? h('div', { class: 'keep' }, rows.map(([sym, t, sub]) => h('div', { class: 'keep-row' }, h('span', { class: 'sym' }, sym),
+    h('div', {}, h('b', {}, t), sub ? h('div', { class: 'row-sub' }, sub) : null)))) : null;
+}
+
+// Nutrición por ración y puntuación de salud con su desglose.
+function nutritionBox(r) {
+  const n = recipeNutrition(r);
+  if (!n) return h('p', { class: 'muted' }, 'Sin datos de nutrición: los ingredientes no están en la tabla de alimentos o les faltan cantidades.');
+  const hs = healthScore(n, r.heat);
+  const cell = (v, u, l) => h('div', { class: 'nut' }, h('b', {}, v), h('small', {}, u), h('span', {}, l));
+  const part = (label, v, max, why) => h('div', { class: 'hs-part' },
+    h('div', { class: 'hs-part-h' }, h('span', {}, label), h('b', {}, `${Math.round(v)} / ${max}`)),
+    h('div', { class: 'bar' }, h('span', { style: `width:${Math.max(0, Math.min(100, (v / max) * 100))}%` })),
+    h('small', { class: 'hint' }, why));
+  const details = h('div', { class: 'hs-details', hidden: true },
+    part('Proteína y fibra', hs.ppf, 30, `${fmtG(n.protein)} g de proteína y ${fmtG(n.fiber)} g de fibra por ración`),
+    part('Carga glucémica', hs.pcg, 25, Number.isFinite(hs.R) ? `${fmtG(n.carbs)} g de hidratos netos por cada ${fmtG(n.fiber)} g de fibra (${fmtG(hs.R)} a 1)` : 'Hidratos sin fibra'),
+    part('Grasas', hs.plip, 25, `${hs.lipA ? '✓' : '✗'} insaturadas/saturadas ≥ 2 · ${hs.lipB ? '✓' : '✗'} omega-6/omega-3 ≤ 4`),
+    part('Vitaminas y minerales', hs.pmic, 20, Object.entries(hs.micro).map(([k, v]) => `${MICRO_NAMES[k]} ${Math.round(v)} %`).join(' · ')),
+    hs.fdeg ? h('div', { class: 'hs-part' }, h('div', { class: 'hs-part-h' }, h('span', {}, 'Resta'), h('b', { class: 'neg' }, `−${hs.fdeg}`)),
+      h('small', { class: 'hint' }, [hs.naK > 1 ? 'más sodio que potasio (−10)' : null, hs.heat ? `cocción a más de 180 °C (−${hs.heat})` : null].filter(Boolean).join(' · '))) : null,
+    h('p', { class: 'hint' }, n.source === 'receta' ? 'Valores nutricionales de la receta.' :
+      'Estimación a partir de los ingredientes con tablas de composición (BEDCA/USDA)' + (n.missing.length ? `; sin datos de: ${n.missing.join(', ')}.` : '.')));
+  return h('div', {},
+    h('div', { class: 'nut-grid' },
+      cell(Math.round(n.kcal), 'kcal', 'Energía'), cell(fmtG(n.protein), 'g', 'Proteína'), cell(fmtG(n.carbs), 'g', 'Hidratos'),
+      cell(fmtG(n.fat), 'g', 'Grasas'), cell(fmtG(n.fiber), 'g', 'Fibra')),
+    h('div', { class: 'split muted', style: 'margin-top:6px' }, h('span', {}, `Saturadas ${fmtG(n.sat)} g`), h('span', {}, `Sodio ${Math.round(n.sodium)} mg`), h('span', {}, `Omega-3 ${fmtG(n.o3)} g`)),
+    h('button', { class: 'hs-box ' + healthLevel(hs.score), onclick: (e) => { details.hidden = !details.hidden; e.currentTarget.classList.toggle('open', !details.hidden); } },
+      h('span', { class: 'hs-num' }, hs.score), h('span', {}, h('b', {}, 'Salud'), h('small', {}, ' de 100 · toca para ver por qué'))),
+    details);
 }
 
 // ── Ficha ──
@@ -261,27 +339,44 @@ export function openRecipe(id) {
     out.push(h('div', { class: 'fav-row' }, h('span', { class: 'lbl' }, 'Favorita de'),
       ppl.map((p) => h('button', { class: 'chip heart' + (st.isFav(id, p.id) ? ' on' : ''), onclick: () => st.toggleFav(id, p.id) }, (st.isFav(id, p.id) ? '❤️ ' : '🤍 ') + p.name)),
       h('button', { class: 'chip', onclick: openPeople, 'aria-label': 'Quiénes sois' }, ppl.length ? '⚙' : '+ Decir quiénes sois')));
+    const raters = ppl.length ? ppl.map((p) => [p.id, p.name]) : [['casa', 'casa']];
+    const avg = st.ratingAvg(id);
+    out.push(h('div', { class: 'fav-row' }, h('span', { class: 'lbl' }, 'Nota'),
+      raters.map(([pid, nm]) => { const v = st.rating(id, pid); return h('button', { class: 'chip' + (v !== null ? ' on-soft' : ''), onclick: () => rateSheet(id, pid, nm) }, `${ppl.length ? nm + ' ' : ''}★ ${v ?? '–'}`); }),
+      ppl.length > 1 && avg !== null ? h('small', { class: 'muted' }, `Media ${st.fmtNum(avg)}`) : null));
     const min = st.recipeMinutes(r);
     out.push(h('div', { class: 'split' },
       r.prepMin ? h('span', {}, `Preparación: ${fmtMin(+r.prepMin)}`) : null,
       r.cookMin ? h('span', {}, `Cocción: ${fmtMin(+r.cookMin)}`) : null,
       min ? h('span', {}, h('b', {}, `Total: ${fmtMin(min)}`)) : null));
     if (catBadges(r).length) out.push(h('div', { class: 'badges', style: 'margin-top:8px' }, catBadges(r).map((b) => badge(b))));
+    const keep = conservation(r);
+    if (keep) out.push(keep);
 
     out.push(h('div', { class: 'section-h' }, h('h3', {}, 'Ingredientes'),
       base ? h('div', { class: 'stepper' },
         h('button', { 'aria-label': 'Menos raciones', onclick: () => { if (servings > 1) { servings--; sh.refresh(); } } }, icon('minus')),
         h('b', {}, `${servings} rac.`),
         h('button', { 'aria-label': 'Más raciones', onclick: () => { servings++; sh.refresh(); } }, icon('plus'))) : null));
-    out.push(h('div', { class: 'ing-list' }, (r.ingredients || []).map((ing) => ingLine(ing, factor))));
+    const ess = (r.ingredients || []).filter((i) => !i.optional);
+    const rec = (r.ingredients || []).filter((i) => i.optional);
+    if (rec.length) out.push(h('div', { class: 'ing-h' }, 'Imprescindibles'));
+    out.push(h('div', { class: 'ing-list' }, ess.map((ing) => ingLine(ing, factor))));
+    if (rec.length) {
+      out.push(h('div', { class: 'ing-h' }, 'Recomendados', h('small', {}, ' · si faltan, también sale')));
+      out.push(h('div', { class: 'ing-list' }, rec.map((ing) => ingLine(ing, factor))));
+    }
     out.push(h('div', { class: 'actions two' },
       h('button', { class: 'btn primary', onclick: () => toListSheet(id, factor) }, icon('cart'), 'A la lista'),
       h('button', { class: 'btn', onclick: () => cookSheet(id, factor) }, '🍳 La he cocinado')));
     out.push(h('button', { class: 'btn block', onclick: () => addToMenuSheet(id) }, '📅 Añadir al menú semanal'));
 
+    if ((r.tips || []).length) out.push(h('h3', {}, '💡 Consejos clave'), h('ul', { class: 'tips' }, r.tips.map((x) => h('li', {}, x))));
     if ((r.steps || []).length) {
       out.push(h('h3', {}, 'Preparación'), h('ol', { class: 'steps' }, r.steps.map((x) => h('li', {}, x))));
     }
+    if ((r.pairings || []).length) out.push(h('h3', {}, '🫙 Salsas y aderezos que le van bien'), h('ul', { class: 'tips pairings' }, r.pairings.map((x) => h('li', {}, x))));
+    out.push(h('h3', {}, 'Nutrición por ración'), nutritionBox(r));
     if (r.notes) out.push(h('h3', {}, 'Notas'), h('p', { class: 'notes' }, r.notes));
     if (r.source) out.push(h('p', { class: 'muted' }, 'Fuente: ', /^https?:\/\//.test(r.source) ? h('a', { href: r.source, target: '_blank', rel: 'noopener' }, r.source) : r.source));
     out.push(h('div', { class: 'btn-row', style: 'margin-top:14px' },
@@ -297,7 +392,7 @@ function ingLine(ing, factor) {
   const qty = ing.qty ? +ing.qty * factor : null;
   const mark = s.state === 'basic' ? h('span', { class: 'ing-mark basic' }, '·')
     : s.state === 'ok' ? h('span', { class: 'ing-mark ok' }, '✓')
-      : h('span', { class: 'ing-mark ' + (s.optional ? 'basic' : 'bad') }, '✗');
+      : h('span', { class: 'ing-mark ' + (s.optional ? 'mid' : 'bad') }, '✗');
   let sub = null;
   if (s.state === 'basic') sub = 'Básico: se da por hecho que hay';
   else if (s.unlinked) sub = 'No está vinculado al inventario';
@@ -307,7 +402,7 @@ function ingLine(ing, factor) {
   }
   return h('div', { class: 'ing' }, mark,
     h('div', { class: 'row-main' },
-      h('div', {}, ing.name, ing.optional ? h('span', { class: 'muted' }, ' (opcional)') : null),
+      h('div', {}, ing.name),
       sub ? h('div', { class: 'row-sub' }, sub) : null),
     h('div', { class: 'ing-qty' }, fmtAmount(qty, ing.unit) || (ing.unit === '' && ing.note ? ing.note : '')));
 }
@@ -320,12 +415,14 @@ function recipeText(r, factor, servings) {
   lines.push('', '*Ingredientes*');
   for (const i of r.ingredients || []) {
     const a = fmtAmount(i.qty ? +i.qty * factor : null, i.unit);
-    lines.push(`- ${i.name}${a ? ': ' + a : ''}${i.optional ? ' (opcional)' : ''}`);
+    lines.push(`- ${i.name}${a ? ': ' + a : ''}${i.optional ? ' (recomendado)' : ''}`);
   }
+  if ((r.tips || []).length) { lines.push('', '*Consejos*'); r.tips.forEach((x) => lines.push(`- ${x}`)); }
   if ((r.steps || []).length) {
     lines.push('', '*Preparación*');
     r.steps.forEach((x, k) => lines.push(`${k + 1}. ${x}`));
   }
+  if ((r.pairings || []).length) { lines.push('', '*Salsas y aderezos*'); r.pairings.forEach((x) => lines.push(`- ${x}`)); }
   if (r.notes) lines.push('', r.notes);
   return lines.join('\n');
 }
@@ -361,7 +458,7 @@ function toListSheet(id, factor) {
       const amount = s.p ? st.fmtQty(listQty(ing, s.p, factor, mode === 'missing'), s.p.unit) : fmtAmount(ing.qty ? +ing.qty * factor : null, ing.unit);
       return h('label', { class: 'row pick' }, cb,
         h('div', { class: 'row-main' }, h('div', { class: 'row-title' }, ing.name),
-          h('div', { class: 'row-sub' }, already ? 'Ya está en la lista' : [amount, s.state === 'ok' ? 'lo tienes' : s.optional ? 'opcional' : 'falta'].filter(Boolean).join(' · '))));
+          h('div', { class: 'row-sub' }, already ? 'Ya está en la lista' : [amount, s.state === 'ok' ? 'lo tienes' : s.optional ? 'recomendado' : 'falta'].filter(Boolean).join(' · '))));
     })),
     field('Lista', lSel),
     h('button', { class: 'btn primary block', onclick: () => {
@@ -429,6 +526,15 @@ export function editRecipe({ id = null, preset = null, onSaved } = {}) {
   const steps = h('textarea', { class: 'inp tall', placeholder: 'Un paso por línea' }, (r.steps || []).join('\n'));
   const notes = h('textarea', { class: 'inp', placeholder: 'Trucos, variantes…' }, r.notes || '');
   const source = inp({ value: r.source || '', placeholder: 'Libro, web o persona (opcional)' });
+  const tips = h('textarea', { class: 'inp', placeholder: 'Un consejo por línea' }, (r.tips || []).join('\n'));
+  const pairings = h('textarea', { class: 'inp', placeholder: 'Una por línea (p. ej. Yogur con menta)' }, (r.pairings || []).join('\n'));
+  const freeze = select([['', '—'], ['si', 'Sí'], ['parcial', 'Solo en parte'], ['no', 'No']], r.freeze || '');
+  const freezeMonths = numInput(r.freezeMonths ?? '', { placeholder: 'meses' });
+  const freezeNote = inp({ value: r.freezeNote || '', placeholder: 'p. ej. sin la patata; la nata, al recalentar' });
+  const fridgeDays = numInput(r.fridgeDays ?? '', { placeholder: 'días' });
+  const roomHours = numInput(r.roomHours ?? '', { placeholder: 'horas' });
+  const heat = select([['0', 'No (vapor, guiso, horno suave, baja temperatura)'], ['5', 'Poco: sellado breve (−5)'], ['10', 'Algo: plancha, horno fuerte, wok (−10)'],
+    ['15', 'Bastante: tostado o gratinado intenso (−15)'], ['20', 'Mucho: brasa muy marcada o fritura (−20)']], String(r.heat ?? 0));
 
   const thumb = recThumb(r, 'thumb big');
   const fileIn = h('input', { type: 'file', accept: 'image/*', capture: 'environment', hidden: true });
@@ -474,7 +580,7 @@ export function editRecipe({ id = null, preset = null, onSaved } = {}) {
       h('div', { class: 'ing-opts' },
         h('button', { type: 'button', class: 'mini-chip' + (p ? ' on' : ''), onclick: () => linkSheet(ing, drawIngs) }, p ? '🔗 ' + p.name : 'Sin vincular'),
         h('button', { type: 'button', class: 'mini-chip' + (ing.basic ? ' on' : ''), onclick: () => { ing.basic = !ing.basic; drawIngs(); } }, 'Básico'),
-        h('button', { type: 'button', class: 'mini-chip' + (ing.optional ? ' on' : ''), onclick: () => { ing.optional = !ing.optional; drawIngs(); } }, 'Opcional')));
+        h('button', { type: 'button', class: 'mini-chip' + (ing.optional ? ' on' : ''), onclick: () => { ing.optional = !ing.optional; drawIngs(); } }, 'Recomendado')));
   }));
   drawIngs();
 
@@ -485,6 +591,9 @@ export function editRecipe({ id = null, preset = null, onSaved } = {}) {
       name: nm, prepMin: num(prep.value), cookMin: num(cook.value), servings: num(serv.value),
       steps: steps.value.split('\n').map((x) => x.trim()).filter(Boolean),
       notes: notes.value.trim(), source: source.value.trim(),
+      tips: tips.value.split('\n').map((x) => x.trim()).filter(Boolean), pairings: pairings.value.split('\n').map((x) => x.trim()).filter(Boolean),
+      freeze: freeze.value || null, freezeMonths: num(freezeMonths.value), freezeNote: freezeNote.value.trim(),
+      fridgeDays: num(fridgeDays.value), roomHours: num(roomHours.value), heat: +heat.value || 0,
       ingredients: r.ingredients.filter((i) => (i.name || '').trim()).map((i) => ({ ...i, name: i.name.trim() })),
     });
     for (const k of Object.keys(r.cats)) if (!r.cats[k].length) delete r.cats[k];
@@ -516,9 +625,17 @@ export function editRecipe({ id = null, preset = null, onSaved } = {}) {
         drawIngs();
         ingBox.querySelector('.ing-edit:last-child input')?.focus();
       } }, icon('plus'), 'Añadir ingrediente'),
-      h('p', { class: 'hint' }, '🔗 Vinculado: se comprueba si lo tienes. Básico: sal, agua… (siempre hay). Opcional: no cuenta para el color.')),
+      h('p', { class: 'hint' }, '🔗 Vinculado: se comprueba si lo tienes. Básico: sal, agua… (siempre hay). Recomendado: mejora la receta pero no es imprescindible. La receta sale en rojo si falta algún imprescindible y en amarillo si faltan la mitad o más de los recomendados.')),
     h('fieldset', {}, h('legend', {}, 'Filtros'), catBox),
     field('Preparación (pasos)', steps),
+    field('💡 Consejos clave', tips),
+    field('🫙 Salsas y aderezos que le van bien', pairings),
+    h('fieldset', {}, h('legend', {}, 'Conservación'),
+      h('div', { class: 'grid2' }, field('¿Se congela?', freeze), field('Congelado, hasta', freezeMonths)),
+      field('Nota sobre congelar', freezeNote),
+      h('div', { class: 'grid2' }, field('En la nevera (días)', fridgeDays), field('Sin refrigerar (horas)', roomHours)),
+      h('p', { class: 'hint' }, 'Un plato cocinado no debería pasar más de 2 horas a temperatura ambiente (1 hora si hace mucho calor).')),
+    field('¿Se cocina a más de 180 °C?', heat, 'Cuenta para la puntuación de salud (resta por compuestos de la cocción muy fuerte).'),
     field('Notas', notes),
     field('Fuente', source),
     h('button', { class: 'btn primary block', onclick: save }, icon('check'), 'Guardar'),
@@ -644,12 +761,27 @@ function toDraft(x) {
   add('Tipo', x.weight ?? x.tipo, false);
   add(S.recipeGroups[st.COURSE_GROUP]?.name || 'Tipo de plato', x.course ?? x.dish ?? x.plato ?? x.tipoPlato, true);
   for (const [gname, vals] of Object.entries(x.extra || x.filtros || {})) add(gname, vals, true);
-  r.ingredients = (x.ingredients || x.ingredientes || []).map((i) => {
+  r.tips = [].concat(x.tips || x.consejos || []).map(String).filter(Boolean);
+  r.pairings = [].concat(x.pairings || x.salsas || x.aderezos || []).map(String).filter(Boolean);
+  const fz = x.freeze ?? x.congelar;
+  r.freeze = fz === true ? 'si' : fz === false ? 'no' : ['si', 'sí', 'parcial', 'no'].includes(st.norm(fz || '')) ? st.norm(fz).replace('í', 'i') : null;
+  r.freezeMonths = num(x.freezeMonths ?? x.mesesCongelado) || null;
+  r.freezeNote = String(x.freezeNote || '').trim();
+  r.fridgeDays = num(x.fridgeDays ?? x.diasNevera) || null;
+  r.roomHours = num(x.roomHours ?? x.horasSinNevera) || null;
+  r.heat = Math.max(0, Math.min(20, num(x.heat ?? x.calor) || 0));
+  if (x.nutrition && typeof x.nutrition === 'object') r.nutrition = x.nutrition;
+  add(S.recipeGroups[st.PROTEIN_GROUP]?.name || 'Proteína', x.protein ?? x.proteina, true);
+  // Ingredientes en dos apartados (imprescindibles y recomendados) o en una sola lista.
+  const rawIngs = x.essential || x.recommended
+    ? [...(x.essential || []), ...(x.recommended || []).map((i) => ({ ...(typeof i === 'string' ? { name: i } : i), optional: true })), ...(x.basics || []).map((i) => ({ ...(typeof i === 'string' ? { name: i } : i), basic: true }))]
+    : x.ingredients || x.ingredientes || [];
+  r.ingredients = rawIngs.map((i) => {
     const ing = typeof i === 'string' ? { name: i } : i;
     const nm = String(ing.name || ing.nombre || '').trim();
     return {
       id: uid(), name: nm, qty: num(ing.qty ?? ing.cantidad), unit: normUnit(ing.unit ?? ing.unidad),
-      basic: !!(ing.basic ?? ing.basico), optional: !!(ing.optional ?? ing.opcional), productId: guessProduct(nm),
+      basic: !!(ing.basic ?? ing.basico), optional: !!(ing.optional ?? ing.opcional ?? ing.recommended ?? ing.recomendado), productId: guessProduct(nm),
     };
   }).filter((i) => i.name);
   return r;
@@ -663,9 +795,19 @@ function importSheet() {
     st.commit();  // guarda los filtros nuevos que traiga
     s.close();
     if (drafts.length === 1) { editRecipe({ preset: drafts[0] }); return; }
-    drafts.forEach((d) => { S.recipes[d.id] = { ...d, u: Date.now() }; });
+    // Las que ya existen (mismo nombre) se actualizan conservando su foto; las demás se crean.
+    const byName = new Map(st.recipes().map((r) => [st.norm(r.name), r]));
+    const dup = drafts.filter((d) => byName.has(st.norm(d.name)));
+    const update = !dup.length || confirm(`Ya tienes ${dup.length} de estas recetas. ¿Actualizarlas con lo del archivo?\n\nAceptar: actualizarlas · Cancelar: dejarlas como están`);
+    let n = 0;
+    for (const d of drafts) {
+      const old = byName.get(st.norm(d.name));
+      if (old && !update) continue;
+      S.recipes[old ? old.id : d.id] = { ...d, id: old ? old.id : d.id, photo: old?.photo || null, u: Date.now() };
+      n++;
+    }
     st.commit();
-    toast(`${drafts.length} recetas importadas`);
+    toast(`${n} receta${n === 1 ? '' : 's'} importada${n === 1 ? '' : 's'}${dup.length && update ? ` (${dup.length} actualizada${dup.length === 1 ? '' : 's'})` : ''}`);
   };
   const s = openSheet('Importar receta', () => [
     h('p', { class: 'muted' }, 'Pídele a Claude una receta «para importar en la app del inventario» y te pasará un archivo .json o un texto.'),

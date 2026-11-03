@@ -7,6 +7,7 @@ import { D, setDevice } from './device.js';
 import { h, icon, inp, select, toggle, num, openSheet, toast, copyText } from './ui.js';
 import { fmtAmount, openRecipe, cookSheet } from './recipes.js';
 import { findBasic } from './productdb.js';
+import { recipeNutrition, healthScore, balance, variety, healthLevel, fmtG } from './nutri.js';
 
 export const SLOTS = { desayuno: 'Desayuno', comida: 'Comida', merienda: 'Merienda', cena: 'Cena' };
 const ORDER = ['desayuno', 'comida', 'merienda', 'cena'];
@@ -21,7 +22,7 @@ const COURSE_BY_TYPE = {
 };
 const DAYS = ['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado', 'Domingo'];
 const MONTHS = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic'];
-const LEVEL = { ok: 'ok', few: 'warn', many: 'bad' };
+const LEVEL = { ok: 'ok', few: 'mid', many: 'bad' };
 
 let week = null; // lunes de la semana que se ve (AAAA-MM-DD)
 
@@ -109,10 +110,14 @@ export function renderMenu(box) {
       h('button', { class: 'btn small', disabled: !planned.length, onclick: async () => toast((await copyText(menuText(days, slots))) ? 'Menú copiado' : 'No se pudo copiar') }, icon('copy'), 'Copiar menú'),
       h('button', { class: 'btn small', onclick: () => openSheet('Comidas del menú', () => [
         h('p', { class: 'muted' }, 'Qué comidas del día quieres planificar (en este móvil).'), ...slotToggles()]) }, '⚙ Comidas')),
+    weekCard(days, slots),
     h('div', { class: 'week' }, days.map((d) => {
       const dayHas = withRecipes(dishesIn([d], slots)).length;
+      const bal = dayBalance(d, slots);
       return h('div', { class: 'day' + (d === t ? ' today' : '') + (d < t ? ' past' : '') },
-        h('div', { class: 'day-h' }, h('b', {}, DAYS[dayIdx(d)]), h('small', {}, d === t ? 'Hoy · ' + dayNum(d) : dayNum(d)),
+        h('div', { class: 'day-h' }, h('b', {}, DAYS[dayIdx(d)]),
+          bal ? h('button', { class: 'day-score ' + healthLevel(bal.score), title: 'Balance del día', onclick: () => balanceSheet(`Balance del ${dayName(d).toLowerCase()}`, bal) }, `${bal.score}`) : null,
+          h('small', {}, d === t ? 'Hoy · ' + dayNum(d) : dayNum(d)),
           dayHas ? h('button', { class: 'icon-btn day-cart', 'aria-label': 'Apuntar los ingredientes de este día', title: 'Apuntar los ingredientes de este día',
             onclick: () => listSheet({ title: `Ingredientes del ${dayName(d).toLowerCase()}`, days: [d], slots }) }, icon('cart')) : null),
         slots.map((s) => mealBtn(d, s)));
@@ -128,13 +133,72 @@ function mealBtn(d, s) {
     const lvl = r ? LEVEL[st.recipeStatus(r, +D.recOrangeMax || 2).level] : null;
     return h('span', { class: 'dish-line' },
       x.cooked ? h('span', { class: 'meal-done' }, '✓') : r ? h('span', { class: 'dot ' + lvl }) : h('span', { class: 'dot' }),
-      h('span', { class: 'meal-name' }, dishName(x)),
-      x.course && ds.length > 1 ? h('small', {}, COURSE_NAME[x.course]) : null,
-      x.servings ? h('small', {}, `${x.servings} rac.`) : null);
+      h('span', { class: 'dish-txt' }, h('span', { class: 'meal-name' }, dishName(x)),
+        x.course && ds.length > 1 ? h('small', {}, COURSE_NAME[x.course]) : null,
+        x.servings ? h('small', {}, `${x.servings} rac.`) : null));
   });
   return h('button', { class: 'meal' + (ds.length ? '' : ' empty'), onclick: () => mealSheet(d, s) },
     h('span', { class: 'meal-slot' }, SLOTS[s]),
     h('span', { class: 'meal-main' }, ds.length ? lines : h('span', { class: 'meal-add' }, '+ Añadir')));
+}
+
+// ── Balance nutricional (por persona: una ración de cada plato) ──
+function dishData(dishes) {
+  const out = [];
+  let without = 0;
+  for (const x of dishes) {
+    const r = recipeById(x.recipeId);
+    const n = r ? recipeNutrition(r) : null;
+    if (!n) { without++; continue; }
+    out.push({ n, health: healthScore(n, r.heat)?.score ?? null, r });
+  }
+  return { items: out, without };
+}
+function dayBalance(d, slots) {
+  const { items, without } = dishData(dishesIn([d], slots).map((x) => x.dish));
+  const b = balance(items);
+  return b ? { ...b, without } : null;
+}
+function weekBalance(days, slots) {
+  const ds = days.map((d) => dayBalance(d, slots)).filter(Boolean);
+  if (!ds.length) return null;
+  const all = dishData(dishesIn(days, slots).map((x) => x.dish));
+  const v = all.items.length >= 8 ? variety(all.items.map((x) => x.r)) : null;
+  const dayAvg = ds.reduce((a, b) => a + b.score, 0) / ds.length;
+  const score = Math.round(v ? 0.7 * dayAvg + 0.3 * v.score : dayAvg);
+  return { score, dayAvg: Math.round(dayAvg), days: ds.length, variety: v, total: balance(all.items), without: all.without };
+}
+function weekCard(days, slots) {
+  const w = weekBalance(days, slots);
+  if (!w) return null;
+  return h('button', { class: 'week-score ' + healthLevel(w.score), onclick: () => balanceSheet('Balance de la semana', w.total, w) },
+    h('span', { class: 'hs-num' }, w.score),
+    h('span', { class: 'ws-main' }, h('b', {}, 'Balance de la semana'),
+      h('small', {}, `${w.days} día${w.days === 1 ? '' : 's'} con datos${w.variety ? ` · variedad ${w.variety.score}` : ''} · toca para ver el detalle`)));
+}
+function balanceSheet(title, b, w = null) {
+  const lvl = (s) => (s >= 75 ? 'ok' : s >= 50 ? 'mid' : 'bad');
+  const crit = (name, value, ok, s, tip) => h('div', { class: 'crit ' + lvl(s) },
+    h('div', { class: 'crit-h' }, h('span', {}, name), h('b', {}, value)),
+    h('div', { class: 'bar' }, h('span', { style: `width:${Math.round(s)}%` })),
+    h('small', { class: 'hint' }, `Recomendado: ${ok}${s < 75 && tip ? ' · ' + tip : ''}`));
+  const per = b.n ? b.sum : null;
+  openSheet(title, () => [
+    h('div', { class: 'hs-box big ' + healthLevel(w ? w.score : b.score) },
+      h('span', { class: 'hs-num' }, w ? w.score : b.score),
+      h('span', {}, h('b', {}, w ? 'Semana' : 'Día'), h('small', {}, ' de 100'))),
+    w ? h('p', { class: 'hint' }, `Media de los días: ${w.dayAvg}${w.variety ? ` · variedad: ${w.variety.score} (cuenta un 30 %)` : ' · la variedad se valora a partir de 8 platos con receta'}.`) : null,
+    h('h3', {}, 'Calidad de los platos'),
+    crit('Salud media de las recetas', `${b.quality} / 100`, '75 o más', b.quality, 'cambia algún plato por otro con más verdura, legumbre o pescado'),
+    h('h3', {}, 'Reparto' + (w ? ' (toda la semana)' : '')),
+    b.crit.map((c) => crit(c.name, c.value, c.ok, c.s, c.tip)),
+    w?.variety ? [h('h3', {}, 'Variedad de la semana'), w.variety.checks.map((c) => crit(c.name, `${c.value} plato${c.value === 1 ? '' : 's'}`, c.ok, c.s, ''))] : null,
+    per ? h('div', { class: 'nut-grid', style: 'margin-top:14px' },
+      ...[[Math.round(per.kcal), 'kcal', 'Energía'], [fmtG(per.protein), 'g', 'Proteína'], [fmtG(per.carbs), 'g', 'Hidratos'], [fmtG(per.fat), 'g', 'Grasas'], [fmtG(per.fiber), 'g', 'Fibra']]
+        .map(([v, u, l]) => h('div', { class: 'nut' }, h('b', {}, v), h('small', {}, u), h('span', {}, l)))) : null,
+    h('p', { class: 'hint' }, `Por persona, contando una ración de cada plato${w ? ' de toda la semana' : ''}. Se valora en proporciones, así que sirve aunque solo planifiquéis comida y cena. Son estimaciones a partir de los ingredientes.`
+      + ((w ? w.without : b.without) ? ` Hay ${w ? w.without : b.without} plato${(w ? w.without : b.without) === 1 ? '' : 's'} sin datos (texto libre o receta sin cantidades).` : '')),
+  ]);
 }
 
 // ── Una comida: sus platos y añadir más ──
