@@ -78,13 +78,17 @@ En **Ajustes** de la app podéis elegir: avisar de todo, solo de los artículos 
 - **Artículos**: cada uno puede tener varias marcas con su código; la ★ es la favorita y es la que sale en la lista de la compra. Las existencias van por lotes (marca + caducidad) y al gastar se usa primero lo que caduca antes.
 - **Mínimo y «Reponer hasta»**: cuando hay menos del mínimo, el artículo pasa solo a la lista de la compra con la cantidad que falta hasta el objetivo. Si apagas **Reponer**, no entra nunca.
 - **Listas**: «General» recibe todo por defecto. Crea las que quieras (IKEA, Comida…), mueve artículos entre ellas o asigna a cada artículo su **lista habitual**. Puedes añadir cosas que no están en el inventario.
-- **Al comprar**: por defecto, al tocar el círculo la cosa va **al carro**. En casa, «🧺 Guardar la compra» pasa todo lo del carro al inventario de una vez (cantidad, caducidad y dónde va). En Ajustes › Compra puedes cambiarlo por «preguntar» o «sumar directamente».
+- **Al comprar**: por defecto, al tocar el círculo la cosa va **al carro**. En casa, «🧺 Guardar la compra» pasa todo lo del carro al inventario de una vez (cantidad, caducidad y dónde va). Todo viene marcado para guardar (lo que no estaba en el inventario se crea como artículo nuevo); al terminar se ve dónde ha ido cada cosa, con «Verlo en el inventario» y «Deshacer». En Ajustes › Compra puedes cambiarlo por «preguntar» o «sumar directamente».
 
 ## Ubicaciones
 
-En **Ajustes › Ubicaciones** creas estancias, muebles y estantes (hasta 3 niveles) y marcas cuáles son **de reserva**.
+En **Ajustes › Ubicaciones** creas estancias, muebles y estantes (hasta 3 niveles) y marcas cuáles son **de reserva**. La lista se despliega con las flechas (▸ / ▾).
 Las existencias de un artículo pueden estar repartidas: lo que está en reserva no cuenta como «a mano» ni para el mínimo de compra.
 Desde la ficha de un artículo puedes mover existencias de un sitio a otro o «traer de la reserva».
+
+- **Colores**: cada estancia tiene un color y lo que hay dentro lo hereda cada vez más clarito (cocina verde fuerte › armario verde medio › balda verde clarito). Lo que está a mano va en **tonos fríos** y la reserva en **tonos cálidos**. En cada ubicación puedes elegir otro color o un símbolo (🧊, 🗄️…).
+- **Elegir sitio**: al guardar, mover o crear algo, «Dónde» abre el árbol de ubicaciones: tocas la flecha para desplegar y el nombre para elegir. Con muchas ubicaciones sale también un buscador.
+- **Inventario › 🗂️ Por sitios**: el inventario como árbol desplegable (estancia › mueble › estante) con lo que hay en cada sitio y cuántas cosas tiene. Recuerda qué tenías desplegado.
 
 ## Lista de la compra (pantalla principal)
 
@@ -124,11 +128,14 @@ En Recetas › «✨ Ideas con lo que tengo» se genera un texto con lo que hay 
 - Los ingredientes se **vinculan** con artículos del inventario. Así la receta sale en **verde** si tienes todo a mano, en **naranja** si faltan 1 o 2 y en **rojo** si faltan más. La reserva no cuenta; los ingredientes **básicos** (sal, agua…) y los **opcionales** no cuentan para el color.
 - **A la lista**: añade solo lo que falta o todos los ingredientes (puedes desmarcar).
 - **La he cocinado**: descuenta del inventario lo usado.
-- **Filtros**: disponibilidad, tiempo, ingrediente, «Momento» (desayuno, comida, cena…), «Tipo» (ligero/pesado) y los que crees en «⚙ Filtros de recetas».
+- **Filtros**: disponibilidad, tiempo, ingrediente, «Tipo de plato» (desayuno, entrante, primero, plato principal, postre, salsa), «Momento» (desayuno, comida, cena…), «Tipo» (ligero/pesado), favoritas y los que crees en «⚙ Filtros de recetas».
+- **Favoritas con nombre**: en Ajustes › «Quiénes sois» (o desde cualquier receta) ponéis vuestros nombres. En cada receta, cada uno marca la suya con ❤️ y los dos veis las de los dos.
+- **Organizar**: disponibles primero, orden alfabético, más rápidas, **por tipo de plato** (con apartados) o **por favoritas** (de todos, de cada uno y las demás).
 
 ## Menú semanal
 
-En Recetas › «📅 Menú semanal»: cada día tiene comida y cena (también desayuno y merienda, si los activas en «⚙ Comidas»). En cada una pones una receta (con las raciones que quieras) o un texto libre («sobras», «cena fuera»). También se puede añadir desde la ficha de una receta.
+En Recetas › «📅 Menú semanal»: cada día tiene comida y cena (también desayuno y merienda, si los activas en «⚙ Comidas»). Cada comida puede tener **varios platos** (entrante, primero, segundo, guarnición, postre), cada uno una receta con sus raciones o un texto libre («sobras», «pizza»). Al añadir, elige el tipo y ve tocando recetas: después del entrante se propone el primero, luego el segundo… También se puede añadir desde la ficha de una receta.
+- **Apuntar ingredientes desde el menú**: «A la lista» en cada plato, «Apuntar los ingredientes de esta comida» y el 🛒 de cada día.
 - **🛒 Lista de la semana**: suma los ingredientes de todas las recetas (ajustados a las raciones), resta lo que tenéis a mano (sin la reserva) y apunta solo lo que falta. Lo no vinculado al inventario se suma por nombre. Las comidas ya cocinadas no cuentan.
 - **La hemos cocinado**: descuenta los ingredientes y marca la comida con ✓.
 - **Copiar menú**: texto listo para WhatsApp.
@@ -142,7 +149,7 @@ Pídele a Claude «una receta para importar en la app del inventario». En la ap
   "app": "inventario-casa", "kind": "recipe", "version": 1,
   "recipe": {
     "name": "Garbanzos con espinacas", "servings": 4, "prepMinutes": 10, "cookMinutes": 20,
-    "meal": ["Comida", "Cena"], "weight": "Ligero", "extra": { "Cocina": ["Andaluza"] },
+    "course": ["Primero"], "meal": ["Comida", "Cena"], "weight": "Ligero", "extra": { "Cocina": ["Andaluza"] },
     "ingredients": [
       { "name": "Garbanzos cocidos", "qty": 800, "unit": "g" },
       { "name": "Comino molido", "qty": 1, "unit": "cdta", "optional": true },

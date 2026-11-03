@@ -3,8 +3,8 @@ import { kvGet, kvSet } from './db.js';
 
 export const GENERAL = 'general';
 export const UNITS = { ud: 'ud.', kg: 'kg', g: 'g', l: 'l', ml: 'ml' };
-export const SCHEMA = 6;
-const COLLECTIONS = ['products', 'lists', 'items', 'locations', 'tags', 'stores', 'recipes', 'recipeGroups', 'menu', 'freq'];
+export const SCHEMA = 7;
+const COLLECTIONS = ['products', 'lists', 'items', 'locations', 'tags', 'stores', 'recipes', 'recipeGroups', 'menu', 'freq', 'people', 'recipeFavs'];
 
 export const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 const now = () => Date.now();
@@ -35,6 +35,8 @@ function emptyState() {
     recipeGroups: {},
     menu: {},
     freq: {},
+    people: {},
+    recipeFavs: {},
     settings: { ...DEFAULT_SETTINGS },
     backupInfo: { last: 0, by: '', u: 0 },
   };
@@ -75,6 +77,8 @@ function ensure() {
 function normalize() {
   seedTaxonomy();
   if (!Object.keys(S.recipeGroups).length) seedRecipeGroups();
+  // v1.8: filtro «Tipo de plato» (si se borra, no vuelve).
+  if (!S.recipeGroups[COURSE_GROUP]) seedGroup(RG_COURSE, -1);
   for (const p of Object.values(S.products)) {
     if (p.del) continue;
     if ('room' in p || 'furniture' in p || 'shelf' in p) {
@@ -101,14 +105,17 @@ function normalize() {
   }
 }
 
+export const COURSE_GROUP = 'rg-plato';
+const RG_COURSE = [COURSE_GROUP, 'Tipo de plato', true, ['Desayuno', 'Entrante', 'Primero', 'Plato principal', 'Postre', 'Salsa']];
 const RG_SEEDS = [
   ['rg-momento', 'Momento', true, ['Desayuno', 'Comida', 'Cena', 'Merienda', 'Picoteo']],
   ['rg-tipo', 'Tipo', false, ['Ligero', 'Pesado']],
 ];
+function seedGroup([id, name, multi, opts], order) {
+  S.recipeGroups[id] = { id, name, multi, order, options: opts.map((n) => ({ id: id + '-' + hash(norm(n)), name: n })), u: 1 };
+}
 function seedRecipeGroups() {
-  RG_SEEDS.forEach(([id, name, multi, opts], i) => {
-    S.recipeGroups[id] = { id, name, multi, order: i, options: opts.map((n) => ({ id: id + '-' + hash(norm(n)), name: n })), u: 1 };
-  });
+  RG_SEEDS.forEach((g, i) => seedGroup(g, i));
 }
 
 // Categorías de alimentación con sus subcategorías. Se crean solas si no existen
@@ -638,6 +645,28 @@ export function desiredAlerts() {
 // ── Recetas ────────────────────────────────────────────────
 export const recipes = () => alive(S.recipes).sort((a, b) => a.name.localeCompare(b.name, 'es'));
 export const recipeGroups = () => alive(S.recipeGroups).sort(byOrder);
+
+// ── Personas de casa y recetas favoritas (las ven los dos móviles) ──
+export const people = () => alive(S.people).sort((a, b) => (a.order ?? 0) - (b.order ?? 0) || a.name.localeCompare(b.name, 'es'));
+export function putPerson(p) {
+  p.u = now();
+  S.people[p.id] = p;
+  commit();
+}
+export function deletePerson(id) {
+  const t = now();
+  S.people[id] = { id, del: true, u: t };
+  for (const f of alive(S.recipeFavs)) if (f.personId === id) S.recipeFavs[f.id] = { id: f.id, del: true, u: t };
+  commit();
+}
+const favKey = (rid, pid) => `${rid}|${pid}`;
+export const isFav = (rid, pid) => { const f = S.recipeFavs[favKey(rid, pid)]; return !!(f && !f.del); };
+export const favPeople = (rid) => people().filter((p) => isFav(rid, p.id));
+export function toggleFav(rid, pid) {
+  const id = favKey(rid, pid);
+  S.recipeFavs[id] = isFav(rid, pid) ? { id, del: true, u: now() } : { id, recipeId: rid, personId: pid, u: now() };
+  commit();
+}
 export function putRecipe(r) {
   r.u = now();
   S.recipes[r.id] = r;

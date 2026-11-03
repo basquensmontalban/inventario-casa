@@ -1,6 +1,6 @@
 // Service worker: guarda la app en el móvil para que abra sin conexión.
 // Al publicar cambios, sube el número de versión para forzar la actualización.
-const VERSION = 'inv-v1.7.0';
+const VERSION = 'inv-v1.8.0';
 const SHELL = [
   './', './index.html', './app.js', './store.js', './db.js', './google.js', './scanner.js', './config.js',
   './ui.js', './device.js', './locations.js', './shop.js', './settings.js', './backup.js', './catalog.js', './stores.js', './recipes.js', './basicos.js', './productdb.js', './especias.js', './quickadd.js', './supermode.js', './stockin.js', './off.js', './menu.js',
@@ -9,7 +9,8 @@ const SHELL = [
 const LIB_HOST = 'unpkg.com';
 
 self.addEventListener('install', (e) => {
-  e.waitUntil(caches.open(VERSION).then((c) => c.addAll(SHELL)).then(() => self.skipWaiting()));
+  // cache: 'reload' evita coger copias viejas de la caché del navegador (GitHub guarda 10 min).
+  e.waitUntil(caches.open(VERSION).then((c) => c.addAll(SHELL.map((u) => new Request(u, { cache: 'reload' })))).then(() => self.skipWaiting()));
 });
 
 self.addEventListener('activate', (e) => {
@@ -31,7 +32,7 @@ self.addEventListener('fetch', (e) => {
       const cache = await caches.open(VERSION);
       const key = req.mode === 'navigate' ? './index.html' : req;
       const cached = await cache.match(key, { ignoreSearch: true });
-      const fresh = fetch(req).then((r) => {
+      const fresh = fetch(url.origin + url.pathname, { cache: 'no-cache' }).then((r) => {
         if (r.ok && r.type === 'basic') cache.put(key, r.clone());
         return r;
       }).catch(() => cached);

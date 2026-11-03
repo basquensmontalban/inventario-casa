@@ -4,11 +4,11 @@ import { S, UNITS, uid } from './store.js';
 import * as g from './google.js';
 import { scanBarcode } from './scanner.js';
 import { photoSet, photoDel } from './db.js';
-import { D, loadDevice, onDeviceChange } from './device.js';
+import { D, loadDevice, onDeviceChange, setDevice } from './device.js';
 import {
   $, h, icon, badge, hue, num, field, inp, toggle, select, numInput, indent, toast, openSheet, sheets, closeAll, nav, resizeImage,
 } from './ui.js';
-import { locSelect, openLocations, moveSheet, fromReserveSheet } from './locations.js';
+import { locSelect, openLocations, moveSheet, fromReserveSheet, openLocPicker, locChip, locCrumb, locColor } from './locations.js';
 import { renderShop, shopItems, focusQuickAdd } from './shop.js';
 import { loadRecent, search as qaSearch, addCandidate } from './quickadd.js';
 import { lookupBarcode, fetchImage, bestBasicFor } from './off.js';
@@ -88,11 +88,92 @@ function renderInv(m) {
     m.replaceChildren(
       h('div', { class: 'search' }, icon('search'), search,
         h('button', { class: 'search-btn', onclick: () => openProductDB(), 'aria-label': 'Añadir productos básicos' }, '＋ Básicos')),
+      h('div', { class: 'seg inv-seg', id: 'invSeg' }),
       h('div', { class: 'chips', id: 'invChips' }),
       h('div', { class: 'list', id: 'invList' }),
     );
   }
   renderInvList();
+}
+
+// Ramas abiertas de la vista «Por sitios» (se recuerdan en este móvil).
+let invOpen = null;
+function loadInvOpen() {
+  if (invOpen) return invOpen;
+  try { const v = JSON.parse(localStorage.getItem('invOpen') || 'null'); invOpen = new Set(Array.isArray(v) ? v : st.locChildren(null).map((l) => l.id)); } catch { invOpen = new Set(st.locChildren(null).map((l) => l.id)); }
+  return invOpen;
+}
+function saveInvOpen() { try { localStorage.setItem('invOpen', JSON.stringify([...invOpen])); } catch {} }
+const justSaved = { ids: new Set(), until: 0 };
+// Muestra el inventario (sin filtros) resaltando unos artículos, p. ej. lo que se acaba de guardar.
+function showInInventory(ids = []) {
+  Object.assign(ui, { q: '', filter: 'all', loc: '', tag: '', store: '' });
+  justSaved.ids = new Set(ids);
+  justSaved.until = Date.now() + 8000;
+  const o = loadInvOpen();
+  for (const id of ids) for (const l of S.products[id]?.lots || []) st.locPath(l.locationId).forEach((x) => o.add(x.id));
+  saveInvOpen();
+  setTab('inv');
+}
+
+// Vista «Por sitios»: estancia › mueble › estante desplegables, con lo que hay en cada uno.
+function invTree(list, q) {
+  const own = new Map(); // ubicación → [{ p, qty, exp }]
+  const add = (lid, p, qty, exp) => { const k = lid && st.getLoc(lid) ? lid : ''; if (!own.has(k)) own.set(k, []); own.get(k).push({ p, qty, exp }); };
+  for (const p of list) {
+    const lots = (p.lots || []).filter((l) => +l.qty > 0);
+    if (!lots.length) { add(p.locationId, p, 0, null); continue; }
+    const m = new Map();
+    for (const l of lots) {
+      const k = l.locationId && st.getLoc(l.locationId) ? l.locationId : '';
+      const x = m.get(k) || { qty: 0, exp: null };
+      x.qty = st.round(x.qty + +l.qty);
+      if (l.expiry && (!x.exp || l.expiry < x.exp)) x.exp = l.expiry;
+      m.set(k, x);
+    }
+    for (const [k, x] of m) add(k, p, x.qty, x.exp);
+  }
+  const memo = new Map();
+  const count = (id) => {
+    if (memo.has(id)) return memo.get(id);
+    const n = (own.get(id) || []).length + st.locChildren(id).reduce((a, k) => a + count(k.id), 0);
+    memo.set(id, n);
+    return n;
+  };
+  const o = loadInvOpen();
+  const filtered = !!q || ui.filter !== 'all' || ui.tag || ui.store;
+  const node = (l, depth) => {
+    const n = count(l.id);
+    if (!n && filtered) return null;
+    const isOpen = o.has(l.id) || (filtered && n > 0);
+    const kids = st.locChildren(l.id);
+    const c = locColor(l.id);
+    return h('div', { class: `inv-node d${Math.min(depth, 2)}`, style: `--lh:${c.h};--ls:${c.s}%` },
+      h('button', { class: 'inv-loc', onclick: () => { if (o.has(l.id)) o.delete(l.id); else o.add(l.id); saveInvOpen(); renderInvList(); } },
+        h('span', { class: 'lp-caret' }, kids.length || (own.get(l.id) || []).length ? (isOpen ? '▾' : '▸') : ''),
+        h('span', { class: 'inv-loc-name' }, l.symbol ? l.symbol + ' ' : '', l.name),
+        st.isReserve(l.id) && !st.isReserve(l.parentId) ? h('small', { class: 'inv-res' }, 'reserva') : null,
+        h('span', { class: 'inv-count' }, n)),
+      isOpen ? h('div', { class: 'inv-kids' },
+        (own.get(l.id) || []).sort((a, b) => a.p.name.localeCompare(b.p.name, 'es')).map((x) => invItem(x)),
+        kids.map((k) => node(k, depth + 1))) : null);
+  };
+  const none = own.get('') || [];
+  return [
+    ...st.locChildren(null).map((l) => node(l, 0)),
+    none.length ? h('div', { class: 'inv-node none' },
+      h('div', { class: 'inv-loc' }, h('span', { class: 'lp-caret' }), h('span', { class: 'inv-loc-name' }, 'Sin ubicación'), h('span', { class: 'inv-count' }, none.length)),
+      h('div', { class: 'inv-kids' }, none.sort((a, b) => a.p.name.localeCompare(b.p.name, 'es')).map((x) => invItem(x)))) : null,
+  ].filter(Boolean);
+}
+function invItem({ p, qty, exp }) {
+  const t = st.today();
+  const soon = exp && exp <= st.addDays(t, st.expiryDaysOf(p));
+  return h('button', { class: 'row inv-item' + (justSaved.ids.has(p.id) && Date.now() < justSaved.until ? ' just' : ''), onclick: () => openProduct(p.id) },
+    thumbFor(p, 'thumb sm'),
+    h('div', { class: 'row-main' }, h('div', { class: 'row-title' }, p.name),
+      exp ? h('div', { class: 'row-sub' }, (exp < t ? '⚠️ Caducado ' : soon ? '⏳ Caduca ' : 'Caduca ') + st.fmtDate(exp)) : null),
+    h('div', { class: 'row-qty' + (qty <= 0 ? ' zero' : '') }, h('b', {}, st.fmtNum(qty)), h('small', {}, UNITS[p.unit || 'ud'])));
 }
 
 function renderInvList() {
@@ -112,14 +193,11 @@ function renderInvList() {
   if (ui.filter !== 'all' && F[ui.filter] === false) ui.filter = 'all';
   $('#invChips').replaceChildren(...[
     !F.loc ? null : tree.length
-      ? select([['', 'Todas las ubicaciones'], ...tree.map(({ loc }) => [loc.id, st.locName(loc.id)]), ['__manage', '⚙ Gestionar ubicaciones…']], ui.loc, {
-          class: 'chip' + (ui.loc ? ' on' : ''),
-          onchange: (e) => {
-            if (e.target.value === '__manage') { e.target.value = ui.loc; openLocations(); return; }
-            ui.loc = e.target.value;
-            renderInvList();
-          },
-        })
+      ? h('button', { class: 'chip loc-filter' + (ui.loc ? ' on' : ''), onclick: () => openLocPicker({
+          value: ui.loc || null, none: null, allowNew: false, title: 'Ver lo que hay en…',
+          extra: [['', '📍 Todas las ubicaciones'], ['__manage', '⚙ Gestionar ubicaciones…']],
+          onPick: (v) => { if (v === '__manage') { openLocations(); return; } ui.loc = v || ''; renderInvList(); },
+        }) }, ui.loc ? locChip(ui.loc, { small: true }) : '📍 Todas las ubicaciones', ' ▾')
       : h('button', { class: 'chip', onclick: openLocations }, '+ Ubicaciones'),
     F.tag ? catSelect('tags', 'Todas las categorías', ui.tag, (v) => { ui.tag = v; }) : null,
     F.store ? catSelect('stores', 'Todas las tiendas', ui.store, (v) => { ui.store = v; }) : null,
@@ -142,6 +220,12 @@ function renderInvList() {
     && st.productHasTag(p, ui.tag) && (!ui.store || (p.stores || []).includes(ui.store))
     && (showEmpty || st.total(p) > 0));
   sortProducts(list);
+  const seg = $('#invSeg');
+  const view = D.invView === 'tree' && tree.length ? 'tree' : 'list';
+  seg.hidden = !tree.length;
+  seg.replaceChildren(
+    h('button', { class: view === 'list' ? 'on' : '', onclick: () => { setDevice({ invView: 'list' }); renderInvList(); } }, '☰ Lista'),
+    h('button', { class: view === 'tree' ? 'on' : '', onclick: () => { setDevice({ invView: 'tree' }); renderInvList(); } }, '🗂️ Por sitios'));
   const box = $('#invList');
   if (!all.length) {
     box.replaceChildren(h('div', { class: 'empty' }, icon('box'), h('p', {}, 'Todavía no hay nada.'),
@@ -149,6 +233,8 @@ function renderInvList() {
       h('button', { class: 'btn primary', onclick: () => openProductDB() }, '📚 Añadir productos básicos')));
   } else if (!list.length) {
     box.replaceChildren(h('div', { class: 'empty' }, h('p', {}, 'Nada coincide con la búsqueda.')));
+  } else if (view === 'tree') {
+    box.replaceChildren(...invTree(list, q));
   } else {
     box.replaceChildren(...list.map(productRow));
   }
@@ -201,13 +287,17 @@ function productRow(p) {
   const tot = st.total(p);
   const res = st.inReserve(p);
   const ex = st.productExpiry(p);
-  const sub = [st.loc(p) || 'Sin ubicación', res > 0 ? `${st.fmtNum(res)} en reserva` : null].filter(Boolean).join(' · ');
+  const where = [...new Set((p.lots || []).filter((l) => +l.qty > 0).map((l) => l.locationId || ''))];
+  const locEl = where.length
+    ? [locCrumb(where[0], { small: true }), where.length > 1 ? h('small', {}, `+${where.length - 1}`) : null]
+    : [locCrumb(p.locationId, { small: true })];
+  const sub = h('div', { class: 'row-sub row-locs' }, locEl, res > 0 ? h('small', {}, `${st.fmtNum(res)} en reserva`) : null);
   const syms = st.productTags(p).slice(p.photo ? 0 : 1).map((t) => t.symbol).join('');
-  return h('button', { class: 'row', onclick: () => openProduct(p.id) },
+  return h('button', { class: 'row' + (justSaved.ids.has(p.id) && Date.now() < justSaved.until ? ' just' : ''), onclick: () => openProduct(p.id) },
     thumbFor(p),
     h('div', { class: 'row-main' },
       h('div', { class: 'row-title' }, p.name, syms ? h('span', { class: 'syms' }, syms) : null),
-      h('div', { class: 'row-sub' }, sub),
+      sub,
       (ex || st.needs(p) || p.critical) ? h('div', { class: 'badges' },
         ex === 'expired' ? badge('Caducado', 'bad') : ex === 'soon' ? badge('Caduca pronto', 'warn') : null,
         st.needs(p) ? badge('Bajo mínimo', 'low') : null,
@@ -232,7 +322,7 @@ function openProduct(id) {
       out.push(h('img', { class: 'hero contain', alt: '', src: p.photoUrl, onerror: (e) => e.target.remove() }));
     }
     out.push(h('div', { class: 'meta-line' }, st.productTags(p).map((t) => badge(label(t))),
-      h('span', {}, st.loc(p) ? '📍 ' + st.loc(p) : 'Sin ubicación habitual')));
+      st.loc(p) ? h('span', { class: 'meta-loc' }, '📍 ', locCrumb(p.locationId, { small: true })) : h('span', {}, 'Sin ubicación habitual')));
     if (st.productStores(p).length) out.push(h('div', { class: 'meta-line', style: 'margin-top:6px' }, 'Se compra en: ', st.productStores(p).map((x) => badge(label(x), 'ok'))));
     out.push(h('div', { class: 'stock' },
       h('div', {}, h('b', { class: 'big' }, st.fmtNum(tot)), ' ', UNITS[p.unit || 'ud']),
@@ -259,7 +349,7 @@ function openProduct(id) {
     for (const l of lots) {
       if (l.locationId !== lastLoc) {
         lastLoc = l.locationId;
-        out.push(h('div', { class: 'loc-group' }, icon('pin'), st.locName(l.locationId) || 'Sin ubicación',
+        out.push(h('div', { class: 'loc-group' }, locCrumb(l.locationId),
           l.locationId && st.isReserve(l.locationId) ? badge('reserva', 'low') : null));
       }
       out.push(lotRow(p, l));
@@ -728,7 +818,7 @@ function applyChrome() {
   document.body.style.zoom = String(+D.fontScale || 1);
 }
 
-Object.assign(nav, { render, rerender, setTab, openProduct, openRecipe, expiryHint, newProductDraft, stockLocFor, applyChrome, editProduct, addStockSheet, variantOptions, scheduleSync });
+Object.assign(nav, { showInInventory, render, rerender, setTab, openProduct, openRecipe, expiryHint, newProductDraft, stockLocFor, applyChrome, editProduct, addStockSheet, variantOptions, scheduleSync });
 
 async function start() {
   const res = g.handleRedirect();

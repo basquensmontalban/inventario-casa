@@ -7,10 +7,10 @@ import * as bk from './backup.js';
 import { h, icon, field, inp, select, toggle, openSheet, toast, download, pickFile, fmtDateTime, closeAll, nav, copyText } from './ui.js';
 import { locSelect, openLocations } from './locations.js';
 import { openCatalog, label } from './catalog.js';
-import { openGroups } from './recipes.js';
+import { openGroups, openPeople } from './recipes.js';
 import { slotToggles } from './menu.js';
 
-export const VERSION = '1.7.0';
+export const VERSION = '1.8.0';
 
 const pl = (n, one, many) => `${n} ${n === 1 ? one : many}`;
 const TAB_NAMES = { inv: 'Inventario', shop: 'Compra', recipes: 'Recetas', stores: 'Tiendas' };
@@ -46,6 +46,7 @@ export function renderSettings(m) {
       row('🏬', 'Lista de tiendas', pl(st.stores().length, 'tienda', 'tiendas'), () => openCatalog('stores')),
       row('📝', 'Listas de la compra', pl(st.lists().length, 'lista', 'listas'), openLists),
       row('⚙️', 'Filtros de recetas', st.recipeGroups().map((x) => x.name).join(', ') || 'Ninguno', openGroups),
+      row('❤️', 'Quiénes sois (favoritas)', st.people().map((p) => p.name).join(', ') || 'Nadie todavía', openPeople),
       row('🔔', 'Avisos en el calendario', { all: 'De todos los artículos', critical: 'Solo de los críticos', off: 'Desactivados' }[set.alertsMode], secAlerts),
       row('🛡️', 'Copias de seguridad', info.last ? `Última: ${fmtDateTime(info.last)}` : 'Todavía no hay ninguna', secBackups)),
 
@@ -157,7 +158,7 @@ function secRecipes() {
   openSheet('Recetas', () => [
     field('Color naranja cuando faltan', select([1, 2, 3, 4, 5].map((k) => [k, `Hasta ${k} ingrediente${k > 1 ? 's' : ''}`]), D.recOrangeMax,
       { onchange: (e) => setDevice({ recOrangeMax: +e.target.value }) }), 'Verde: tienes todo. Rojo: faltan más que esto.'),
-    dSel('Orden', [['avail', 'Disponibles primero'], ['name', 'Por nombre'], ['time', 'Más rápidas primero']], 'recSort'),
+    dSel('Orden', [['avail', 'Disponibles primero'], ['name', 'Orden alfabético'], ['time', 'Más rápidas primero'], ['course', 'Por tipo de plato'], ['fav', 'Por favoritas']], 'recSort'),
     dSel('Raciones de una receta nueva', [1, 2, 3, 4, 5, 6, 8].map((k) => [k, String(k)]), 'recServings'),
     sub('Al añadir ingredientes a la lista'),
     field('Lista', select(listOpts('General'), D.recListId || '', { onchange: (e) => setDevice({ recListId: e.target.value }) })),
@@ -166,7 +167,7 @@ function secRecipes() {
     ...slotToggles(),
     sub('Filtros que se ven'),
     dTogIn('Disponibilidad', 'recFilters', 'avail'), dTogIn('Tiempo', 'recFilters', 'time'),
-    dTogIn('Ingrediente', 'recFilters', 'ing'), dTogIn('Orden', 'recFilters', 'sort'),
+    dTogIn('Ingrediente', 'recFilters', 'ing'), dTogIn('Favoritas', 'recFilters', 'fav'), dTogIn('Orden', 'recFilters', 'sort'),
     ...st.recipeGroups().map((gr) => toggle(gr.name, !(D.recHiddenGroups || []).includes(gr.id), null, (v) => {
       const set = new Set(D.recHiddenGroups || []);
       if (v) set.delete(gr.id); else set.add(gr.id);

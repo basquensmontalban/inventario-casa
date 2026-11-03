@@ -9,7 +9,7 @@ import {
 } from './ui.js';
 import { renderMenu, addToMenuSheet } from './menu.js';
 
-const ui = { q: '', avail: '', time: '', ing: '', groups: {}, sort: null, mode: 'recipes' };
+const ui = { q: '', avail: '', time: '', ing: '', fav: '', groups: {}, sort: null, mode: 'recipes' };
 const status = (r) => st.recipeStatus(r, +D.recOrangeMax || 2);
 
 // ── Unidades de los ingredientes ──
@@ -90,8 +90,8 @@ export function renderRecipes(m) {
   if (ui.mode === 'menu') renderMenu($('#menuBox')); else renderList();
 }
 
-function chipSelect(opts, value, set) {
-  return select(opts, value, { class: 'chip' + (value ? ' on' : ''), onchange: (e) => { set(e.target.value); renderList(); } });
+function chipSelect(opts, value, set, neutral = false) {
+  return select(opts, value, { class: 'chip' + (value && !neutral ? ' on' : ''), onchange: (e) => { set(e.target.value); renderList(); } });
 }
 
 function renderList() {
@@ -104,6 +104,8 @@ function renderList() {
   if (!F.time) ui.time = '';
   if (!F.ing) ui.ing = '';
   for (const gid of Object.keys(ui.groups)) if (hidden.has(gid)) delete ui.groups[gid];
+  const people = st.people();
+  if (ui.fav && !['__any', '__all'].includes(ui.fav) && !people.some((p) => p.id === ui.fav)) ui.fav = '';
   const ingNames = [...new Map(all.flatMap((r) => (r.ingredients || []).filter((i) => !i.basic).map((i) => [st.norm(i.name), i.name]))).values()]
     .sort((a, b) => a.localeCompare(b, 'es'));
   if (ui.ing && !ingNames.some((n) => st.norm(n) === ui.ing)) ui.ing = '';
@@ -112,7 +114,9 @@ function renderList() {
     F.time ? chipSelect([['', 'Cualquier tiempo'], ['15', 'Hasta 15 min'], ['30', 'Hasta 30 min'], ['60', 'Hasta 1 h'], ['61', 'Más de 1 h']], ui.time, (v) => { ui.time = v; }) : null,
     ...groups.map((gr) => chipSelect([['', gr.name], ...gr.options.map((o) => [o.id, o.name])], ui.groups[gr.id] || '', (v) => { ui.groups[gr.id] = v; })),
     F.ing && ingNames.length ? chipSelect([['', 'Ingrediente'], ...ingNames.map((n) => [st.norm(n), n])], ui.ing, (v) => { ui.ing = v; }) : null,
-    F.sort ? chipSelect([['avail', 'Disponibles primero'], ['name', 'Por nombre'], ['time', 'Más rápidas']], ui.sort, (v) => { ui.sort = v; }) : null,
+    F.fav !== false && people.length ? chipSelect([['', '❤️ Favoritas'], ['__any', '❤️ De alguien'], ...(people.length > 1 ? [['__all', '❤️ De todos']] : []),
+      ...people.map((p) => [p.id, '❤️ De ' + p.name])], ui.fav, (v) => { ui.fav = v; }) : null,
+    F.sort ? chipSelect(SORTS, ui.sort, (v) => { ui.sort = v; }, true) : null,
   ].filter(Boolean));
 
   const q = st.norm(ui.q);
@@ -121,10 +125,12 @@ function renderList() {
     && (!ui.avail || s.level === ui.avail)
     && (!ui.time || (ui.time === '61' ? min > 60 : min && min <= +ui.time))
     && (!ui.ing || (r.ingredients || []).some((i) => st.norm(i.name) === ui.ing))
-    && groups.every((gr) => !ui.groups[gr.id] || (r.cats?.[gr.id] || []).includes(ui.groups[gr.id])));
+    && groups.every((gr) => !ui.groups[gr.id] || (r.cats?.[gr.id] || []).includes(ui.groups[gr.id]))
+    && favOk(r, people));
   const rank = { ok: 0, few: 1, many: 2 };
   if (ui.sort === 'avail') list.sort((a, b) => rank[a.s.level] - rank[b.s.level] || a.s.n - b.s.n || a.r.name.localeCompare(b.r.name, 'es'));
   if (ui.sort === 'time') list.sort((a, b) => (a.min || 1e9) - (b.min || 1e9));
+  if (ui.sort === 'fav') list.sort((a, b) => st.favPeople(b.r.id).length - st.favPeople(a.r.id).length || a.r.name.localeCompare(b.r.name, 'es'));
 
   const box = $('#recList');
   if (!all.length) {
@@ -132,9 +138,81 @@ function renderList() {
       h('p', {}, 'Crea una con «Nueva» o importa una que te pase Claude.')));
   } else if (!list.length) {
     box.replaceChildren(h('div', { class: 'empty' }, h('p', {}, 'Ninguna receta con esos filtros.')));
+  } else if (ui.sort === 'course' || ui.sort === 'fav') {
+    box.replaceChildren(...grouped(list, people));
   } else {
     box.replaceChildren(...list.map(({ r, s, min }) => recipeCard(r, s, min)));
   }
+}
+
+const SORTS = [['avail', 'Disponibles primero'], ['name', 'Orden alfabético'], ['time', 'Más rápidas'], ['course', 'Por tipo de plato'], ['fav', 'Por favoritas']];
+function favOk(r, people) {
+  if (!ui.fav) return true;
+  const f = st.favPeople(r.id);
+  if (ui.fav === '__any') return f.length > 0;
+  if (ui.fav === '__all') return people.length > 0 && f.length === people.length;
+  return f.some((p) => p.id === ui.fav);
+}
+// Lista con apartados: por tipo de plato (Desayuno, Entrante, Primero…) o por favoritas de cada uno.
+function grouped(list, people) {
+  const out = [];
+  const section = (title, items, sym = '') => {
+    if (!items.length) return;
+    out.push(h('div', { class: 'cat-h rec-h' }, sym ? sym + ' ' : '', title, h('small', {}, ` ${items.length}`)));
+    out.push(...items.sort((a, b) => a.r.name.localeCompare(b.r.name, 'es')).map(({ r, s, min }) => recipeCard(r, s, min)));
+  };
+  if (ui.sort === 'course') {
+    const gr = S.recipeGroups[st.COURSE_GROUP] && !S.recipeGroups[st.COURSE_GROUP].del ? S.recipeGroups[st.COURSE_GROUP] : null;
+    if (!gr) return list.map(({ r, s, min }) => recipeCard(r, s, min));
+    for (const o of gr.options) section(o.name, list.filter((x) => (x.r.cats?.[gr.id] || []).includes(o.id)), COURSE_SYM[st.norm(o.name)] || '🍽️');
+    section('Sin tipo de plato', list.filter((x) => !(x.r.cats?.[gr.id] || []).length));
+    if (list.some((x) => !(x.r.cats?.[gr.id] || []).length)) out.push(h('p', { class: 'hint' }, 'Para darle tipo a una receta: ábrela › Editar › Tipo de plato.'));
+    return out;
+  }
+  if (!people.length) {
+    out.push(h('div', { class: 'note-box ok' }, 'Para tener favoritas, decid primero quiénes sois. ',
+      h('button', { class: 'linkbtn', onclick: openPeople }, 'Añadir personas')));
+    out.push(...list.map(({ r, s, min }) => recipeCard(r, s, min)));
+    return out;
+  }
+  const favs = new Map(list.map((x) => [x.r.id, st.favPeople(x.r.id)]));
+  if (people.length > 1) section('Favoritas de todos', list.filter((x) => favs.get(x.r.id).length === people.length), '💞');
+  for (const p of people) {
+    section('Favoritas de ' + p.name, list.filter((x) => { const f = favs.get(x.r.id); return f.some((y) => y.id === p.id) && (people.length === 1 || f.length < people.length); }), '❤️');
+  }
+  section('Las demás', list.filter((x) => !favs.get(x.r.id).length));
+  return out;
+}
+const COURSE_SYM = { desayuno: '🥐', entrante: '🥗', primero: '🍲', 'plato principal': '🍗', postre: '🍮', salsa: '🫙' };
+
+// Quiénes sois: cada persona puede marcar sus recetas favoritas (se ven en los dos móviles).
+export function openPeople() {
+  const newIn = inp({ placeholder: 'Nombre (p. ej. Marc)', autocapitalize: 'words', enterkeyhint: 'done' });
+  const add = () => {
+    const v = newIn.value.trim();
+    if (!v) { newIn.focus(); return; }
+    if (st.people().some((p) => st.norm(p.name) === st.norm(v))) { toast('Ya está en la lista'); return; }
+    st.putPerson({ id: 'pp-' + uid(), name: v, order: st.people().length });
+    newIn.value = '';
+    newIn.focus();
+  };
+  newIn.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); add(); } });
+  openSheet('Quiénes sois', () => [
+    h('p', { class: 'muted' }, 'Cada uno marca sus recetas favoritas con su nombre, y los dos veis las de los dos.'),
+    st.people().length ? h('div', { class: 'list' }, st.people().map((p) => {
+      const n = st.alive(S.recipeFavs).filter((f) => f.personId === p.id && S.recipes[f.recipeId] && !S.recipes[f.recipeId].del).length;
+      return h('div', { class: 'row' },
+        h('div', { class: 'row-main' }, h('div', { class: 'row-title' }, '❤️ ' + p.name), h('div', { class: 'row-sub' }, `${n} receta${n === 1 ? '' : 's'} favorita${n === 1 ? '' : 's'}`)),
+        h('button', { class: 'icon-btn', 'aria-label': 'Cambiar nombre', onclick: () => {
+          const v = (prompt('Nombre', p.name) || '').trim();
+          if (v && v !== p.name) st.putPerson({ ...st.clone(p), name: v });
+        } }, icon('edit')),
+        h('button', { class: 'icon-btn', 'aria-label': 'Quitar', onclick: () => {
+          if (confirm(`¿Quitar a ${p.name}? Se borran sus favoritas (las recetas no).`)) st.deletePerson(p.id);
+        } }, icon('x')));
+    })) : null,
+    h('div', { class: 'add-form' }, newIn, h('button', { class: 'btn primary', onclick: add }, icon('plus'), 'Añadir')),
+  ], { live: true });
 }
 const $ = (sel) => document.querySelector(sel);
 
@@ -155,7 +233,8 @@ function recipeCard(r, s, min) {
     h('div', { class: 'row-main' },
       h('div', { class: 'row-title' }, r.name),
       h('div', { class: 'row-sub' }, [min ? '⏱ ' + fmtMin(min) : null, statusText(s)].filter(Boolean).join(' · ')),
-      catBadges(r).length ? h('div', { class: 'badges' }, catBadges(r).map((b) => badge(b))) : null),
+      catBadges(r).length || st.favPeople(r.id).length ? h('div', { class: 'badges' },
+        st.favPeople(r.id).map((p) => h('span', { class: 'badge heart' }, '❤️ ' + p.name)), catBadges(r).map((b) => badge(b))) : null),
     h('span', { class: 'dot ' + L.cls }));
 }
 
@@ -178,6 +257,10 @@ export function openRecipe(id) {
       out.push(img);
     }
     out.push(h('div', { class: 'status-box ' + L.cls }, L.dot + ' ' + statusText(s)));
+    const ppl = st.people();
+    out.push(h('div', { class: 'fav-row' }, h('span', { class: 'lbl' }, 'Favorita de'),
+      ppl.map((p) => h('button', { class: 'chip heart' + (st.isFav(id, p.id) ? ' on' : ''), onclick: () => st.toggleFav(id, p.id) }, (st.isFav(id, p.id) ? '❤️ ' : '🤍 ') + p.name)),
+      h('button', { class: 'chip', onclick: openPeople, 'aria-label': 'Quiénes sois' }, ppl.length ? '⚙' : '+ Decir quiénes sois')));
     const min = st.recipeMinutes(r);
     out.push(h('div', { class: 'split' },
       r.prepMin ? h('span', {}, `Preparación: ${fmtMin(+r.prepMin)}`) : null,
@@ -559,6 +642,7 @@ function toDraft(x) {
   };
   add('Momento', x.meal ?? x.momento, true);
   add('Tipo', x.weight ?? x.tipo, false);
+  add(S.recipeGroups[st.COURSE_GROUP]?.name || 'Tipo de plato', x.course ?? x.dish ?? x.plato ?? x.tipoPlato, true);
   for (const [gname, vals] of Object.entries(x.extra || x.filtros || {})) add(gname, vals, true);
   r.ingredients = (x.ingredients || x.ingredientes || []).map((i) => {
     const ing = typeof i === 'string' ? { name: i } : i;

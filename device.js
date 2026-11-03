@@ -15,6 +15,7 @@ export const DEFAULTS = {
   defaultLocationId: null,    // ubicación preferida al crear artículos
   stockLoc: 'product',        // al añadir existencias: product (habitual del artículo) | device (la preferida)
   invSort: 'name',            // name | location | expiry | qty
+  invView: 'list',            // list | tree (por sitios, desplegable)
   invShowEmpty: true,         // mostrar artículos agotados
   invFilters: { loc: true, tag: true, store: true, soon: true, low: true, empty: true, reserve: true, critical: true },
   newUnit: 'ud',              // valores para artículos nuevos
@@ -38,7 +39,7 @@ export const DEFAULTS = {
   // Recetas
   recOrangeMax: 2,            // naranja si faltan como mucho N ingredientes
   recSort: 'avail',           // avail | name | time
-  recFilters: { avail: true, time: true, ing: true, sort: true },
+  recFilters: { avail: true, time: true, ing: true, fav: true, sort: true },
   recHiddenGroups: [],        // grupos de filtros que no se muestran
   recServings: 2,
   recListId: '',
