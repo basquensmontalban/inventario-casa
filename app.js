@@ -334,11 +334,14 @@ function openProduct(id) {
         h('span', {}, `A mano: ${st.fmtQty(st.atHand(p), p.unit)}`), h('span', {}, `En reserva: ${st.fmtQty(res, p.unit)}`),
         h('button', { class: 'linkbtn', onclick: () => fromReserveSheet(id) }, 'Traer de la reserva')));
     }
+    // Un tupper (raciones guardadas de una receta) no se compra: en vez de «A lista», su receta.
+    const tupR = p.tupper && S.recipes[p.recipeId] && !S.recipes[p.recipeId].del ? S.recipes[p.recipeId] : null;
     out.push(h('div', { class: 'actions' },
-      h('button', { class: 'btn', disabled: tot <= 0, onclick: () => spend(id) }, icon('minus'), 'Gastar'),
+      h('button', { class: 'btn', disabled: tot <= 0, onclick: () => spend(id) }, icon('minus'), p.tupper ? 'Comer' : 'Gastar'),
       h('button', { class: 'btn primary', onclick: () => addStockSheet(id) }, icon('plus'), 'Añadir'),
-      h('button', { class: 'btn', onclick: () => addToListSheet(id) }, icon('cart'), 'A lista')));
-    out.push(h('button', { class: 'btn block finished-btn', onclick: () => finished(id) }, '🚫 Se ha acabado (y apuntarlo)'));
+      tupR ? h('button', { class: 'btn', onclick: () => openRecipe(tupR.id) }, '📖 Receta')
+        : p.tupper ? null : h('button', { class: 'btn', onclick: () => addToListSheet(id) }, icon('cart'), 'A lista')));
+    if (!p.tupper) out.push(h('button', { class: 'btn block finished-btn', onclick: () => finished(id) }, '🚫 Se ha acabado (y apuntarlo)'));
 
     out.push(h('h3', {}, 'Existencias'));
     const lots = [...(p.lots || [])].sort((a, b) => (st.isReserve(a.locationId) - st.isReserve(b.locationId))
@@ -355,8 +358,8 @@ function openProduct(id) {
       out.push(lotRow(p, l));
     }
 
-    out.push(h('h3', {}, 'Marcas y códigos'));
-    if (!(p.variants || []).length) out.push(h('p', { class: 'muted' }, 'Sin marcas. Puedes añadirlas en «Editar».'));
+    if (!p.tupper) out.push(h('h3', {}, 'Marcas y códigos'));
+    if (!(p.variants || []).length && !p.tupper) out.push(h('p', { class: 'muted' }, 'Sin marcas. Puedes añadirlas en «Editar».'));
     for (const v of p.variants || []) {
       out.push(h('div', { class: 'lot' }, h('div', { class: 'row-main' },
         h('div', {}, (v.fav ? '★ ' : '') + (v.brand || 'Sin nombre de marca')),
@@ -393,8 +396,8 @@ function lotRow(p, l) {
   };
   return h('div', { class: 'lot' },
     h('div', { class: 'row-main' },
-      h('div', {}, v ? (v.fav ? '★ ' : '') + (v.brand || 'Sin nombre de marca') : 'Sin marca'),
-      h('div', { class: 'row-sub' }, l.expiry ? 'Caduca ' + st.fmtDate(l.expiry) : 'Sin caducidad',
+      h('div', {}, p.tupper ? `${st.fmtNum(l.qty)} ${+l.qty === 1 ? 'ración' : 'raciones'}` : v ? (v.fav ? '★ ' : '') + (v.brand || 'Sin nombre de marca') : 'Sin marca'),
+      h('div', { class: 'row-sub' }, l.expiry ? (p.tupper ? 'Hasta el ' : 'Caduca ') + st.fmtDate(l.expiry) : 'Sin caducidad',
         ex === 'expired' ? [' · ', badge('Caducado', 'bad')] : ex === 'soon' ? [' · ', badge('Pronto', 'warn')] : null)),
     h('div', { class: 'stepper' },
       h('button', { 'aria-label': 'Menos', onclick: () => (isUd ? change(-1) : setQty()) }, icon('minus')),
@@ -529,7 +532,7 @@ function editProduct({ id = null, preset = null, onSaved, focusBrand = false } =
   const tagPick = catalogPicker('tags', p.tags || []);
   const storePick = catalogPicker('stores', p.stores || []);
   const where = locSelect(p.locationId || '');
-  const unit = select(Object.entries({ ud: 'Unidades', kg: 'Kilos', g: 'Gramos', l: 'Litros', ml: 'Mililitros' }), p.unit || 'ud');
+  const unit = select(Object.entries({ ud: 'Unidades', kg: 'Kilos', g: 'Gramos', l: 'Litros', ml: 'Mililitros', rac: 'Raciones' }), p.unit || 'ud');
   // Rellena con los datos de la base de productos básicos (sin pisar lo que ya hayas puesto).
   const applyBasic = (b, force = false) => {
     const f = basicFields(b);

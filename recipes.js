@@ -8,7 +8,8 @@ import {
   h, icon, badge, field, inp, select, toggle, numInput, num, openSheet, toast, copyText, pickFile, resizeImage, hue, nav,
 } from './ui.js';
 import { renderMenu, addToMenuSheet } from './menu.js';
-import { recipeNutrition, healthScore, healthLevel, NRV, MICRO_NAMES, fmtG } from './nutri.js';
+import { locSelect, locCrumb } from './locations.js';
+import { recipeNutrition, healthScore, healthLevel, isRedMeat, NRV, MICRO_NAMES, fmtG } from './nutri.js';
 
 const ui = { q: '', avail: '', time: '', ing: '', fav: '', groups: {}, sort: null, mode: 'recipes' };
 const status = (r) => st.recipeStatus(r);
@@ -41,6 +42,7 @@ const fmtMin = (m) => (m >= 60 ? `${Math.floor(m / 60)} h${m % 60 ? ' ' + (m % 6
 const LEVEL = { ok: { cls: 'ok', dot: '🟢' }, few: { cls: 'mid', dot: '🟡' }, many: { cls: 'bad', dot: '🔴' } };
 function statusText(stt) {
   const list = (xs) => xs.map((i) => i.name).slice(0, 3).join(', ') + (xs.length > 3 ? '…' : '');
+  if (stt.empty) return 'Sin ingredientes todavía';
   if (stt.n) return `Falta${stt.n > 1 ? 'n' : ''} ${stt.n} imprescindible${stt.n > 1 ? 's' : ''}: ${list(stt.missing)}`;
   const m = stt.missingRec.length;
   if (!m) return 'Tienes todo';
@@ -49,7 +51,7 @@ function statusText(stt) {
 // Datos calculados de una receta (nutrición, salud, nota), para la lista y los filtros.
 const info = (r) => {
   const n = recipeNutrition(r);
-  const hs = healthScore(n, r.heat);
+  const hs = healthScore(n, r.heat, { red: isRedMeat(r) });
   return { n, hs, health: hs ? hs.score : null, rating: st.ratingAvg(r.id) };
 };
 const FREEZE = { si: 'Se puede congelar', parcial: 'Se congela en parte', no: 'No se congela' };
@@ -200,7 +202,7 @@ function grouped(list, people) {
   section('Las demás', list.filter((x) => !favs.get(x.r.id).length));
   return out;
 }
-const COURSE_SYM = { desayuno: '🥐', entrante: '🥗', primero: '🍲', 'plato principal': '🍗', postre: '🍮', salsa: '🫙' };
+const COURSE_SYM = { desayuno: '🥐', entrante: '🥗', primero: '🍲', 'plato principal': '🍗', postre: '🍮', salsa: '🫙', acompanamiento: '🥦' };
 
 // Quiénes sois: cada persona puede marcar sus recetas favoritas (se ven en los dos móviles).
 export function openPeople() {
@@ -244,7 +246,7 @@ function catBadges(r, max = 99) {
 }
 
 function recipeCard(r, s, min) {
-  const L = LEVEL[s.level];
+  const L = s.empty ? { cls: '', dot: '' } : LEVEL[s.level];
   return h('button', { class: 'row recipe ' + L.cls, onclick: () => openRecipe(r.id) },
     recThumb(r),
     h('div', { class: 'row-main' },
@@ -265,6 +267,8 @@ function cardFacts(r) {
     r.freeze ? h('span', { class: 'fact' }, r.freeze === 'no' ? '🚫❄️' : '❄️') : null,
     r.fridgeDays ? h('span', { class: 'fact' }, `🧊 ${r.fridgeDays} d`) : null,
   ].filter(Boolean);
+  const tup = st.portionsOf(r.id);
+  if (tup > 0) parts.unshift(h('span', { class: 'fact tup', title: 'Raciones guardadas' }, `🫙 ${st.fmtNum(tup)}`));
   return parts.length ? h('div', { class: 'facts' }, parts) : null;
 }
 
@@ -287,23 +291,25 @@ function conservation(r) {
     h('div', {}, h('b', {}, t), sub ? h('div', { class: 'row-sub' }, sub) : null)))) : null;
 }
 
+const PEN_NAMES = { naK: 'más sodio que potasio', heat: 'cocción a más de 180 °C', sat: 'grasa saturada', processed: 'embutido o carne procesada', red: 'carne roja', kcal: 'muchas calorías por ración' };
 // Nutrición por ración y puntuación de salud con su desglose.
 function nutritionBox(r) {
   const n = recipeNutrition(r);
   if (!n) return h('p', { class: 'muted' }, 'Sin datos de nutrición: los ingredientes no están en la tabla de alimentos o les faltan cantidades.');
-  const hs = healthScore(n, r.heat);
+  const hs = healthScore(n, r.heat, { red: isRedMeat(r) });
   const cell = (v, u, l) => h('div', { class: 'nut' }, h('b', {}, v), h('small', {}, u), h('span', {}, l));
   const part = (label, v, max, why) => h('div', { class: 'hs-part' },
     h('div', { class: 'hs-part-h' }, h('span', {}, label), h('b', {}, `${Math.round(v)} / ${max}`)),
     h('div', { class: 'bar' }, h('span', { style: `width:${Math.max(0, Math.min(100, (v / max) * 100))}%` })),
     h('small', { class: 'hint' }, why));
   const details = h('div', { class: 'hs-details', hidden: true },
-    part('Proteína y fibra', hs.ppf, 30, `${fmtG(n.protein)} g de proteína y ${fmtG(n.fiber)} g de fibra por ración`),
-    part('Carga glucémica', hs.pcg, 25, Number.isFinite(hs.R) ? `${fmtG(n.carbs)} g de hidratos netos por cada ${fmtG(n.fiber)} g de fibra (${fmtG(hs.R)} a 1)` : 'Hidratos sin fibra'),
-    part('Grasas', hs.plip, 25, `${hs.lipA ? '✓' : '✗'} insaturadas/saturadas ≥ 2 · ${hs.lipB ? '✓' : '✗'} omega-6/omega-3 ≤ 4`),
-    part('Vitaminas y minerales', hs.pmic, 20, Object.entries(hs.micro).map(([k, v]) => `${MICRO_NAMES[k]} ${Math.round(v)} %`).join(' · ')),
-    hs.fdeg ? h('div', { class: 'hs-part' }, h('div', { class: 'hs-part-h' }, h('span', {}, 'Resta'), h('b', { class: 'neg' }, `−${hs.fdeg}`)),
-      h('small', { class: 'hint' }, [hs.naK > 1 ? 'más sodio que potasio (−10)' : null, hs.heat ? `cocción a más de 180 °C (−${hs.heat})` : null].filter(Boolean).join(' · '))) : null,
+    hs.max.ppf ? part('Proteína y fibra', hs.ppf, Math.round(hs.max.ppf), `${fmtG(n.protein)} g de proteína y ${fmtG(n.fiber)} g de fibra por ración`) : null,
+    hs.max.pcg ? part('Carga glucémica', hs.pcg, Math.round(hs.max.pcg), Number.isFinite(hs.R) ? `${fmtG(n.carbs)} g de hidratos netos por cada ${fmtG(n.fiber)} g de fibra (${fmtG(hs.R)} a 1)` : 'Hidratos sin fibra') : null,
+    hs.max.lip ? part('Grasas', hs.plip, Math.round(hs.max.lip), `${hs.lipA ? '✓' : '✗'} insaturadas/saturadas ≥ 2 · ${hs.lipB ? '✓' : '✗'} omega-6/omega-3 ≤ 4`) : null,
+    hs.max.mic ? part('Vitaminas y minerales', hs.pmic, Math.round(hs.max.mic), Object.entries(hs.micro).map(([k, v]) => `${MICRO_NAMES[k]} ${Math.round(v)} %`).join(' · ')) : null,
+    hs.fdeg >= 0.5 ? h('div', { class: 'hs-part' }, h('div', { class: 'hs-part-h' }, h('span', {}, 'Resta'), h('b', { class: 'neg' }, `−${Math.round(hs.fdeg)}`)),
+      h('small', { class: 'hint' }, Object.entries(hs.pen).filter(([, v]) => v >= 0.5).map(([k, v]) => `${PEN_NAMES[k]} (−${Math.round(v)})`).join(' · '))) : null,
+    h('button', { class: 'linkbtn', onclick: () => nav.healthSettings?.() }, '⚙ Ajustar qué suma y qué resta'),
     h('p', { class: 'hint' }, n.source === 'receta' ? 'Valores nutricionales de la receta.' :
       'Estimación a partir de los ingredientes con tablas de composición (BEDCA/USDA)' + (n.missing.length ? `; sin datos de: ${n.missing.join(', ')}.` : '.')));
   return h('div', {},
@@ -327,7 +333,7 @@ export function openRecipe(id) {
     if (servings === null) servings = base || 0;
     const factor = base && servings ? servings / base : 1;
     const s = status(r);
-    const L = LEVEL[s.level];
+    const L = s.empty ? { cls: '', dot: '✏️' } : LEVEL[s.level];
     const out = [];
     if (r.photo) {
       const img = h('img', { class: 'hero', alt: '' });
@@ -335,6 +341,8 @@ export function openRecipe(id) {
       out.push(img);
     }
     out.push(h('div', { class: 'status-box ' + L.cls }, L.dot + ' ' + statusText(s)));
+    const tp = st.tupperOf(id);
+    if (tp && st.total(tp) > 0) out.push(tupperBox(tp, () => sh.refresh()));
     const ppl = st.people();
     out.push(h('div', { class: 'fav-row' }, h('span', { class: 'lbl' }, 'Favorita de'),
       ppl.map((p) => h('button', { class: 'chip heart' + (st.isFav(id, p.id) ? ' on' : ''), onclick: () => st.toggleFav(id, p.id) }, (st.isFav(id, p.id) ? '❤️ ' : '🤍 ') + p.name)),
@@ -483,6 +491,8 @@ function toListSheet(id, factor) {
 }
 
 // ── Cocinar: descontar del inventario ──
+// «La he cocinado»: descuenta del inventario lo usado y, si sobran raciones (batch cooking),
+// las guarda como tupper en la nevera o el congelador, con su fecha.
 export function cookSheet(id, factor, onDone) {
   const r = S.recipes[id];
   const rows = (r.ingredients || []).map((ing) => ({ ing, s: st.ingredientState(ing, factor) })).filter((x) => x.s.p);
@@ -491,23 +501,68 @@ export function cookSheet(id, factor, onDone) {
     const val = need !== null ? Math.min(need, st.total(s.p)) : '';
     return { cb: h('input', { type: 'checkbox', checked: need !== null && val > 0 }), q: numInput(val === '' ? '' : st.fmtNum(val), { placeholder: '0' }) };
   });
+  const made = (+r.servings || 0) * factor;
+  const t = st.today();
+  const keep = [
+    { label: '🧊 A la nevera', loc: st.fridgeLoc(), exp: st.addDays(t, +r.fridgeDays || 3),
+      hint: r.fridgeDays ? `Aguanta ${r.fridgeDays} día${+r.fridgeDays === 1 ? '' : 's'} en la nevera.` : 'Sin dato en la receta: se ponen 3 días.' },
+    { label: '❄️ Al congelador', loc: st.freezerLoc(), exp: st.addMonths(t, +r.freezeMonths || 3),
+      hint: r.freeze === 'no' ? '⚠️ Esta receta no se congela bien.' : [r.freezeMonths ? `Hasta ${r.freezeMonths} ${+r.freezeMonths === 1 ? 'mes' : 'meses'} congelado.` : 'Sin dato en la receta: se ponen 3 meses.', r.freezeNote].filter(Boolean).join(' ') },
+  ].map((k) => {
+    const o = { ...k, n: 0, sel: locSelect(k.loc, { none: 'Elige dónde', title: '¿Dónde lo guardas?' }), date: h('input', { type: 'date', class: 'inp', value: k.exp }) };
+    const val = h('b', {});
+    const more = h('div', { class: 'tup-more', hidden: true }, field('Dónde', o.sel), field('Hasta', o.date), h('small', { class: 'hint' }, k.hint));
+    const set = (v) => { o.n = Math.max(0, v); val.textContent = o.n ? `${st.fmtNum(o.n)} rac.` : '—'; more.hidden = !o.n; o.el.classList.toggle('on', !!o.n); };
+    o.el = h('div', { class: 'tup-row' },
+      h('div', { class: 'tup-h' }, h('span', {}, k.label),
+        h('div', { class: 'stepper' },
+          h('button', { type: 'button', 'aria-label': 'Menos', onclick: () => set(o.n - 1) }, icon('minus')), val,
+          h('button', { type: 'button', 'aria-label': 'Más', onclick: () => set(o.n + 1) }, icon('plus')))),
+      more);
+    set(0);
+    return o;
+  });
   const sh = openSheet('La he cocinado', () => [
     h('p', { class: 'muted' }, 'Descuenta del inventario lo que has usado (primero lo que está a mano y caduca antes).'),
-    rows.length ? h('div', { class: 'list' }, rows.map(({ ing, s }, k) => h('div', { class: 'row pick' }, inputs[k].cb,
+    rows.length ? h('div', { class: 'list' }, rows.map(({ s }, k) => h('div', { class: 'row pick' }, inputs[k].cb,
       h('div', { class: 'row-main' }, h('div', { class: 'row-title' }, s.p.name), h('div', { class: 'row-sub' }, `Hay ${st.fmtQty(st.total(s.p), s.p.unit)}`)),
       h('div', { class: 'qty-in' }, inputs[k].q, h('small', {}, st.UNITS[s.p.unit || 'ud'])))))
-      : h('p', {}, 'Ningún ingrediente está vinculado al inventario.'),
-    rows.length ? h('button', { class: 'btn primary block', onclick: () => {
+      : h('p', { class: 'hint' }, 'Ningún ingrediente está vinculado al inventario.'),
+    h('h3', {}, '🫙 ¿Sobran raciones?'),
+    h('p', { class: 'hint' }, (made ? `Has hecho unas ${st.fmtNum(made)} raciones. ` : '') + 'Guarda las que sobren: saldrán en el inventario, en la receta y al poner el menú.'),
+    keep.map((k) => k.el),
+    h('button', { class: 'btn primary block', onclick: () => {
       let n = 0;
       rows.forEach(({ s }, k) => {
         const q = num(inputs[k].q.value);
         if (inputs[k].cb.checked && q > 0) { st.consume(S.products[s.p.id], q); n++; }
       });
+      const entries = keep.filter((k) => k.n > 0).map((k) => ({ qty: k.n, locationId: k.sel.value || null, expiry: k.date.value || null }));
+      const tp = entries.length ? st.saveTupper(r, entries) : null;
+      const saved = entries.reduce((a, e) => a + e.qty, 0);
       sh.close();
       if (onDone) onDone();
-      toast(n ? `Descontados ${n} ingredientes. ¡Que aproveche!` : 'No se ha descontado nada');
-    } }, 'Descontar del inventario') : null,
+      const msg = [n ? `Descontado${n > 1 ? 's' : ''} ${n} ingrediente${n > 1 ? 's' : ''}` : null, tp ? `${st.fmtNum(saved)} rac. al tupper` : null].filter(Boolean);
+      toast(msg.length ? msg.join(' · ') + '. ¡Que aproveche!' : 'No se ha descontado nada',
+        tp ? { action: 'Ver', ms: 6000, onAction: () => nav.showInInventory?.([tp.id]) } : undefined);
+    } }, 'Hecho'),
   ]);
+}
+
+// Raciones guardadas de una receta (en la ficha).
+function tupperBox(tp, refresh) {
+  const tot = st.total(tp);
+  const lots = [...(tp.lots || [])].filter((l) => +l.qty > 0).sort((a, b) => (a.expiry || '9999').localeCompare(b.expiry || '9999'));
+  return h('div', { class: 'tup-box' },
+    h('b', {}, `🫙 ${st.fmtNum(tot)} ${tot === 1 ? 'ración guardada' : 'raciones guardadas'}`),
+    h('div', { class: 'tup-lots' }, lots.map((l) => {
+      const e = st.expiryState(tp, l);
+      return h('div', { class: 'tup-lot' + (e ? ' ' + e : '') }, l.locationId && st.getLoc(l.locationId) ? locCrumb(l.locationId, { small: true }) : h('span', { class: 'muted' }, 'Sin sitio'),
+        h('small', {}, `${st.fmtNum(l.qty)} rac.` + (l.expiry ? ` · ${e === 'expired' ? 'caducó el' : 'hasta el'} ${st.fmtDate(l.expiry)}` : '')));
+    })),
+    h('div', { class: 'actions two' },
+      h('button', { class: 'btn small', onclick: () => { st.consume(S.products[tp.id], 1); toast('Una ración menos en el tupper'); refresh(); } }, '🍽️ Comer una ración'),
+      h('button', { class: 'btn small', onclick: () => nav.openProduct?.(tp.id) }, 'Ver en el inventario')));
 }
 
 // ── Editor ──
@@ -732,13 +787,13 @@ function findOrCreateOption(groupName, optName, multi = true) {
   if (!gr) {
     gr = { id: 'rg-' + uid(), name: groupName, multi, options: [] };
     S.recipeGroups[gr.id] = gr;
-    gr.u = Date.now();
+    gr.u = st.stamp();
   }
   let o = gr.options.find((x) => st.norm(x.name) === st.norm(optName));
   if (!o) {
     o = { id: gr.id + '-' + uid(), name: String(optName).trim() };
     gr.options.push(o);
-    gr.u = Date.now();
+    gr.u = st.stamp();
   }
   return [gr.id, o.id];
 }
@@ -803,7 +858,7 @@ function importSheet() {
     for (const d of drafts) {
       const old = byName.get(st.norm(d.name));
       if (old && !update) continue;
-      S.recipes[old ? old.id : d.id] = { ...d, id: old ? old.id : d.id, photo: old?.photo || null, u: Date.now() };
+      S.recipes[old ? old.id : d.id] = { ...d, id: old ? old.id : d.id, photo: old?.photo || null, u: st.stamp() };
       n++;
     }
     st.commit();

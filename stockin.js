@@ -62,7 +62,7 @@ export function openStockIn() {
       h('button', { class: 'btn primary block', onclick: save }, 'Guardar en el inventario'),
       h('button', { class: 'btn block', onclick: () => {
         if (!confirm('¿Quitar todo del carro sin guardarlo en el inventario?')) return;
-        const t = Date.now();
+        const t = st.stamp();
         for (const r of rows) S.items[r.it.id] = { id: r.it.id, del: true, u: t };
         st.commit();
         s.close();
@@ -90,7 +90,7 @@ export function openStockIn() {
     const before = { products: {}, items: {} };
     const out = [];
     try {
-      const t = Date.now();
+      const t = st.stamp();
       const entries = [];
       for (const r of rows) {
         const cur = S.items[r.it.id];
@@ -131,7 +131,7 @@ export function openStockIn() {
       return;
     }
     undo = () => {
-      const t = Date.now();
+      const t = st.stamp();
       for (const [id, v] of Object.entries(before.items)) if (v) S.items[id] = { ...v, u: t };
       for (const [id, v] of Object.entries(before.products)) S.products[id] = v ? { ...v, u: t } : { id, del: true, u: t };
       st.commit();

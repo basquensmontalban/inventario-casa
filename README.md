@@ -127,13 +127,20 @@ En Recetas › «✨ Ideas con lo que tengo» se genera un texto con lo que hay 
 - Cada receta tiene foto, tiempos de preparación y cocción, raciones (se pueden escalar), ingredientes, pasos, notas y fuente.
 - Los ingredientes se **vinculan** con artículos del inventario. Así la receta sale en **verde** si tienes todo a mano, en **naranja** si faltan 1 o 2 y en **rojo** si faltan más. La reserva no cuenta; los ingredientes **básicos** (sal, agua…) y los **opcionales** no cuentan para el color.
 - **A la lista**: añade solo lo que falta o todos los ingredientes (puedes desmarcar).
-- **La he cocinado**: descuenta del inventario lo usado.
+- **La he cocinado**: descuenta del inventario lo usado y, si sobran raciones, las guarda como **tupper** (ver más abajo).
 - **Filtros**: disponibilidad, tiempo, ingrediente, «Tipo de plato» (desayuno, entrante, primero, plato principal, postre, salsa), «Momento» (desayuno, comida, cena…), «Tipo» (ligero/pesado), favoritas y los que crees en «⚙ Filtros de recetas».
 - **Imprescindibles y recomendados**: la receta sale en 🔴 rojo si falta algún imprescindible, en 🟡 amarillo si tienes lo imprescindible pero faltan la mitad o más de los recomendados, y en 🟢 verde en los demás casos. Si un ingrediente no se vinculó a mano, la app lo busca en el inventario por el nombre cada vez.
 - **Ficha completa**: consejos clave, salsas y aderezos que le van bien, conservación (si se congela y cuánto, días en nevera, horas sin refrigerar) y nota de 0 a 10 de cada uno.
-- **Nutrición y salud**: kcal, proteína, hidratos, grasas y fibra por ración, calculados a partir de los ingredientes con una tabla de composición (estimación), y una puntuación de salud de 0 a 100 con el criterio del recetario: S = máx(0, proteína y fibra (30) + carga glucémica (25) + grasas (25) + vitaminas y minerales (20) − sodio/potasio y cocción a más de 180 °C). Toca la puntuación para ver el desglose.
+- **Nutrición y salud**: kcal, proteína, hidratos, grasas y fibra por ración, calculados a partir de los ingredientes con una tabla de composición (estimación), y una puntuación de salud de 0 a 100 con el criterio del recetario: S = máx(0, proteína y fibra (30) + carga glucémica (25) + grasas (25) + vitaminas y minerales (20) − sodio/potasio y cocción a más de 180 °C). Toca la puntuación para ver el desglose. En Ajustes › «Puntuación de salud» (común a los dos móviles) se puede ajustar cuánto pesa cada cosa que suma y cuánto resta cada castigo, incluidos castigos que el documento no tenía: grasa saturada, embutidos y carnes procesadas, carne roja y muchas calorías por ración. Mientras mueves los deslizadores ves cómo cambia la nota de algunas de vuestras recetas; «Volver al criterio del documento» lo deja como al principio.
 - **Favoritas con nombre**: en Ajustes › «Quiénes sois» (o desde cualquier receta) ponéis vuestros nombres. En cada receta, cada uno marca la suya con ❤️ y los dos veis las de los dos.
 - **Organizar**: disponibles primero, orden alfabético, más rápidas, **por tipo de plato** (con apartados) o **por favoritas** (de todos, de cada uno y las demás).
+
+## Tuppers (batch cooking)
+
+Al pulsar **La he cocinado** (en la receta o en el menú), en «🫙 ¿Sobran raciones?» indicas cuántas raciones van **a la nevera** y cuántas **al congelador**. La app propone la nevera y el congelador que tengáis en Ubicaciones (cualquier sitio que se llame «Nevera»/«Frigo» o «Congelador») y la fecha según la receta: los días que aguanta en la nevera o los meses que aguanta congelada (3 días o 3 meses si la receta no lo dice).
+- Se guardan como un artículo «Tupper de …» **en raciones**, con la etiqueta «Platos preparados»: sale en el inventario en su sitio, con su fecha y con sus avisos de caducidad. Nunca va a la lista de la compra.
+- En la **ficha de la receta** se ve cuántas raciones hay y dónde; «Comer una ración» descuenta una (primero la de la nevera). En la lista de recetas, la tarjeta lleva 🫙 y el número de raciones.
+- En el **menú**, al añadir un plato aparece «🫙 De lo que tenéis guardado». Un plato del tupper no apunta ingredientes a la lista; «🍽️ Sacar» descuenta sus raciones. Desde la ficha, «Añadir al menú» propone ponerlo del tupper si quedan raciones.
 
 ## Menú semanal
 
@@ -186,7 +193,9 @@ Ajustes está organizado por secciones:
 
 Todo se guarda en el móvil y funciona sin internet. Al volver la conexión, se sincroniza solo.
 El lector de códigos se descarga la primera vez que lo usas con conexión; después funciona sin ella.
-Si los dos editáis el mismo artículo sin conexión, se queda el cambio más reciente.
+Si los dos cambiáis lo mismo a la vez (o sin conexión), la app **junta los dos cambios**: en las existencias suma lo que hizo cada uno (si uno gasta 1 y el otro añade 3, quedan 2 más), en los platos del menú y las etiquetas se quedan los de los dos, y en los demás datos se combina campo a campo. Solo si los dos cambiáis el mismo dato (por ejemplo, el nombre) se queda el más reciente.
+Si una subida a Drive falla, los cambios siguen pendientes y se vuelven a subir solos en la siguiente sincronización.
+Usad los dos móviles con la misma versión de la app: una versión antigua no sabe juntar los cambios.
 
 ## Actualizar la app
 
@@ -200,3 +209,4 @@ Los móviles cogen la versión nueva la segunda vez que abren la app.
 - **Error 403 `access_denied`**: la cuenta no está en *Usuarios de prueba* (paso 2.5).
 - **Error de permisos en el calendario**: en `config.js`, cambia `calendar.app.created` por `calendar` y vuelve a conectar.
 - **«Conectar» aparece a menudo**: Google pide renovar el permiso cada hora. Con *Reconectar al abrir la app* activado en Ajustes se hace solo.
+- **Google vuelve a pedir el permiso completo cada semana**: suele pasar mientras el proyecto de Google Cloud está «En prueba». Para evitarlo: Google Cloud › *Pantalla de consentimiento de OAuth* (o *Audiencia*) › **Publicar aplicación**. Para vuestro uso no hace falta que Google la verifique; si al conectar sale el aviso de «app no verificada», se acepta en *Configuración avanzada › Ir a …*.

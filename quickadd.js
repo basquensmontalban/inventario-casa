@@ -56,6 +56,7 @@ function candidates() {
   const out = [];
   const have = new Set();
   for (const p of st.products()) {
+    if (p.tupper) continue;   // los tuppers no se compran
     have.add(st.norm(p.name));
     const b = findBasic(p.name);
     out.push({ kind: 'product', name: p.name, p, symbol: p.symbol || st.productTags(p)[0]?.symbol || b?.symbol || '📦',

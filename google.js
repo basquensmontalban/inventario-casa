@@ -157,7 +157,7 @@ async function uploadPhotos(folder) {
     if (!blob) continue;
     const f = await multipartCreate({ name: `foto-${p.photo.id}.jpg`, parents: [folder] }, blob);
     p.photo.driveId = f.id;
-    p.u = Date.now();
+    p.u = st.stamp();
   }
 }
 
@@ -199,6 +199,8 @@ async function doSync() {
   if (!token()) return setStatus('auth');
   setStatus('syncing');
   const m = st.meta;
+  let cleared = false;   // se ha quitado la marca de «cambios por subir»…
+  let uploaded = false;  // …y la subida ha terminado bien
   try {
     const folder = await ensureFolder();
     await uploadPhotos(folder);
@@ -225,7 +227,13 @@ async function doSync() {
     }
 
     let remote = null;
-    if (m.fileId) {
+    // La versión común solo vale para el mismo archivo de Drive (si cambia la carpeta o el archivo, no se usa).
+    const sameFile = !!m.fileId && m.baseFileId === m.fileId;
+    if (sameFile && md5 && md5 === m.baseMd5 && st.getBase()) {
+      // Drive tiene justo la versión que este móvil ya incorporó: no hace falta descargarla otra vez.
+      remote = st.getBase();
+      m.remoteMd5 = md5;
+    } else if (m.fileId) {
       try {
         remote = await api(`${DRIVE}/files/${m.fileId}?alt=media`);
         if (typeof remote === 'string') remote = JSON.parse(remote);
@@ -234,8 +242,14 @@ async function doSync() {
         if (e.status === 404) m.fileId = null;
         else throw e;
       }
+      if (remote) {
+        st.merge(remote, { useBase: sameFile });
+        // Lo fusionado y la nueva versión común se guardan juntos en el móvil.
+        m.baseFileId = m.fileId;
+        await st.setBase(remote, md5);
+        remote = st.getBase();
+      }
     }
-    st.merge(remote);
     st.refreshAuto();
 
     // El calendario se crea antes de subir los datos, para que el otro móvil lo reutilice.
@@ -258,7 +272,9 @@ async function doSync() {
       console.warn('backup', e);
     }
 
+    // Si algo cambia aquí mientras se sube, volverá a marcarse como pendiente y se subirá en la siguiente.
     m.dirty = false;
+    cleared = true;
     if (st.newerThan(remote)) {
       const body = JSON.stringify(st.S);
       if (m.fileId) {
@@ -275,7 +291,10 @@ async function doSync() {
         m.fileId = f.id;
         m.remoteMd5 = f.md5Checksum || null;
       }
+      m.baseFileId = m.fileId;
+      await st.setBase(body, m.remoteMd5);
     }
+    uploaded = true;
     m.lastSync = Date.now();
     st.commit({ local: false });
 
@@ -291,6 +310,8 @@ async function doSync() {
     setStatus('ok');
   } catch (e) {
     console.warn('sync', e);
+    // Si no se llegó a subir, los cambios siguen pendientes (y no se muestra «Al día»).
+    if (cleared && !uploaded) m.dirty = true;
     await st.saveMeta();
     if (e instanceof AuthError) setStatus('auth');
     else setStatus(navigator.onLine ? 'error' : 'offline', e.message);

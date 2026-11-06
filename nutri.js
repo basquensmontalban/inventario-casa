@@ -25,7 +25,7 @@ function index() {
   INDEX = FOODS.map(([name, aliases, vals, units]) => {
     const per = Object.fromEntries(KEYS.map((k, i) => [k, vals[i] || 0]));
     const keys = [name, ...(aliases || [])].map((x) => st.norm(x));
-    return { name, per, units: units || {}, keys, kw: keys.map((k) => words(k).map(stem)) };
+    return { name, per, units: units || {}, processed: !!(units && units.proc), keys, kw: keys.map((k) => words(k).map(stem)) };
   });
   return INDEX;
 }
@@ -68,6 +68,7 @@ export function recipeNutrition(r) {
   const tot = Object.fromEntries(KEYS.map((k) => [k, 0]));
   let known = 0;
   let unknown = 0;
+  let processed = 0;
   const missing = [];
   for (const ing of r.ingredients || []) {
     const food = foodFor(ing.name);
@@ -76,45 +77,74 @@ export function recipeNutrition(r) {
     if (g === null) { if (!ing.basic && !food?.trivial) missing.push(ing.name); continue; }
     if (!food) { unknown += g; missing.push(ing.name); continue; }
     known += g;
+    if (food.processed) processed += g;
     for (const k of KEYS) tot[k] += (food.per[k] * g) / 100;
   }
   const coverage = known + unknown > 0 ? known / (known + unknown) : 0;
   const computed = Object.fromEntries(KEYS.map((k) => [k, tot[k] / serv]));
   const explicit = r.nutrition && +r.nutrition.kcal > 0 ? r.nutrition : null;
   if (explicit && (coverage < 0.85 || missing.length > 2)) {
-    return { ...Object.fromEntries(KEYS.map((k) => [k, +explicit[k] || 0])), source: 'receta', coverage, missing: [] };
+    return { ...Object.fromEntries(KEYS.map((k) => [k, +explicit[k] || 0])), processed: processed / serv, source: 'receta', coverage, missing: [] };
   }
-  if (!(computed.kcal > 0) || coverage < 0.5) return explicit ? { ...explicit, source: 'receta', coverage, missing: [] } : null;
-  return { ...computed, source: 'calculado', coverage, missing };
+  if (!(computed.kcal > 0) || coverage < 0.5) return explicit ? { ...explicit, processed: processed / serv, source: 'receta', coverage, missing: [] } : null;
+  return { ...computed, processed: processed / serv, source: 'calculado', coverage, missing };
 }
 
-// ── Puntuación de salud (0–100), según el criterio del recetario ──
-// S = máx(0, Ppf + Pcg + Plip + Pmic − Fdeg)
-export function healthScore(n, heat = 0) {
+// ── Puntuación de salud (0–100), según el criterio del recetario y ajustable ──
+// Lo que suma: cuatro factores con su peso (por defecto 30 + 25 + 25 + 20 = 100). Si se cambian los pesos,
+// el total se reescala para que siga yendo de 0 a 100.
+// Lo que resta: sodio > potasio y cocción a más de 180 °C (como en el documento) y, si se activan,
+// grasa saturada, embutidos y carnes procesadas, carne roja y platos muy calóricos.
+export const HEALTH_DEFAULTS = { ppf: 30, pcg: 25, lip: 25, mic: 20, naK: 10, heat: 100, sat: 0, processed: 0, red: 0, kcal: 0 };
+export const healthConfig = () => ({ ...HEALTH_DEFAULTS, ...(st.S?.settings?.health || {}) });
+const clamp01 = (x) => Math.max(0, Math.min(1, x));
+// ¿Es de carne roja? (según su filtro «Proteína»)
+export function isRedMeat(r) {
+  const gr = st.recipeGroups().find((g) => st.norm(g.name) === 'proteina');
+  if (!gr || !r) return false;
+  return (r.cats?.[gr.id] || []).some((oid) => st.norm(gr.options.find((o) => o.id === oid)?.name || '') === 'carne roja');
+}
+export function healthScore(n, heat = 0, { red = false } = {}, cfg = healthConfig()) {
   if (!n || !(n.kcal > 0)) return null;
   const per100kcal = n.kcal / 100;
-  // Densidad proteico-fibrosa: (proteína + 2·fibra) por 100 kcal × 3,75, hasta 30.
-  const ppf = Math.min(30, ((n.protein + 2 * n.fiber) / per100kcal) * 3.75);
-  // Cinética glucémica: R = hidratos netos / fibra; 25 si R ≤ 5 y −1,5 por cada unidad más.
+  // Densidad proteico-fibrosa: (proteína + 2·fibra) por 100 kcal; el máximo se alcanza con 8.
+  const fPpf = clamp01((n.protein + 2 * n.fiber) / per100kcal / 8);
+  // Cinética glucémica: R = hidratos netos / fibra; entero si R ≤ 5 y −6 % por cada unidad más.
   const R = n.fiber > 0 ? n.carbs / n.fiber : n.carbs > 1 ? Infinity : 0;
-  const pcg = Math.max(0, Math.min(25, 25 - 1.5 * Math.max(0, R - 5)));
-  // Perfil lipídico: +15 si insaturadas/saturadas ≥ 2; +10 si omega-6/omega-3 ≤ 4.
+  const fPcg = clamp01((25 - 1.5 * Math.max(0, R - 5)) / 25);
+  // Perfil lipídico: 15/25 si insaturadas/saturadas ≥ 2; 10/25 si omega-6/omega-3 ≤ 4.
   const unsat = n.mono + n.poly;
   const lipA = n.sat <= 0.05 ? unsat >= 0 : unsat / n.sat >= 2;
   const lipB = n.o3 > 0 ? n.o6 / n.o3 <= 4 : n.o6 < 0.05;
-  const plip = (lipA ? 15 : 0) + (lipB ? 10 : 0);
-  // Densidad micronutricional: media del % de VRN (cada uno hasta 100 %) por cada 10 % de las kcal del día, hasta 20.
+  const fLip = ((lipA ? 15 : 0) + (lipB ? 10 : 0)) / 25;
+  // Densidad micronutricional: media del % de VRN (cada uno hasta 100 %) por cada 10 % de las kcal del día; entero con 20.
   const micro = Object.fromEntries(Object.entries(NRV).map(([k, v]) => [k, Math.min(100, (n[k] / v) * 100)]));
   const avg = Object.values(micro).reduce((a, b) => a + b, 0) / 6;
-  const pmic = Math.min(20, avg / (n.kcal / 200));
-  // Degradación: −10 si sodio/potasio > 1; −5 a −20 por cocción a más de 180 °C.
+  const fMic = clamp01(avg / (n.kcal / 200) / 20);
+  const W = (+cfg.ppf || 0) + (+cfg.pcg || 0) + (+cfg.lip || 0) + (+cfg.mic || 0);
+  const k = W > 0 ? 100 / W : 0;
+  const max = { ppf: cfg.ppf * k, pcg: cfg.pcg * k, lip: cfg.lip * k, mic: cfg.mic * k };
+  const ppf = fPpf * max.ppf;
+  const pcg = fPcg * max.pcg;
+  const plip = fLip * max.lip;
+  const pmic = fMic * max.mic;
+  // Lo que resta
   const naK = n.potassium > 0 ? n.sodium / n.potassium : n.sodium > 0 ? Infinity : 0;
-  const fdeg = (naK > 1 ? 10 : 0) + (+heat || 0);
+  const satE = (n.sat * 9 * 100) / n.kcal;
+  const pen = {
+    naK: naK > 1 ? +cfg.naK || 0 : 0,
+    heat: ((+heat || 0) * (+cfg.heat || 0)) / 100,
+    sat: (+cfg.sat || 0) * clamp01((satE - 10) / 10),
+    processed: (+cfg.processed || 0) * clamp01((n.processed || 0) / 30),
+    red: red ? +cfg.red || 0 : 0,
+    kcal: (+cfg.kcal || 0) * clamp01((n.kcal - 600) / 300),
+  };
+  const fdeg = Object.values(pen).reduce((a, b) => a + b, 0);
   const score = Math.max(0, Math.round(ppf + pcg + plip + pmic - fdeg));
-  return { score, ppf, pcg, plip, pmic, fdeg, R, naK, micro, lipA, lipB, heat: +heat || 0 };
+  return { score, ppf, pcg, plip, pmic, fdeg, pen, max, R, naK, satE, micro, lipA, lipB, heat: +heat || 0 };
 }
 
-export const recipeHealth = (r) => healthScore(recipeNutrition(r), r?.heat);
+export const recipeHealth = (r) => healthScore(recipeNutrition(r), r?.heat, { red: isRedMeat(r) });
 export const healthLevel = (s) => (s === null || s === undefined ? '' : s >= 75 ? 'ok' : s >= 50 ? 'mid' : 'bad');
 
 // ── Balance de un día (o de varios) a partir de los platos ──

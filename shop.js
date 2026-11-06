@@ -188,14 +188,14 @@ function emptyList(l) {
     + (autos ? `\n\n${autos} está${autos > 1 ? 'n' : ''} bajo mínimo: no volverá${autos > 1 ? 'n' : ''} a la lista hasta que se reponga${autos > 1 ? 'n' : ''} y vuelva${autos > 1 ? 'n' : ''} a bajar.` : '');
   if (!confirm(msg)) return;
   const before = its.map(st.clone);
-  const t = Date.now();
+  const t = st.stamp();
   for (const it of its) {
     if (it.auto) { it.dismissed = true; it.done = false; it.u = t; }
     else S.items[it.id] = { id: it.id, del: true, u: t };
   }
   st.commit();
   toast('Lista vaciada', { action: 'Deshacer', ms: 6000, onAction: () => {
-    const t2 = Date.now();
+    const t2 = st.stamp();
     before.forEach((x) => { x.u = t2; S.items[x.id] = x; });
     st.commit();
   } });

@@ -1,9 +1,9 @@
 // Service worker: guarda la app en el móvil para que abra sin conexión.
 // Al publicar cambios, sube el número de versión para forzar la actualización.
-const VERSION = 'inv-v1.9.0';
+const VERSION = 'inv-v1.10.0';
 const SHELL = [
   './', './index.html', './app.js', './store.js', './db.js', './google.js', './scanner.js', './config.js',
-  './ui.js', './device.js', './locations.js', './shop.js', './settings.js', './backup.js', './catalog.js', './stores.js', './recipes.js', './basicos.js', './productdb.js', './especias.js', './quickadd.js', './supermode.js', './stockin.js', './off.js', './menu.js', './nutri.js', './nutridb.js',
+  './ui.js', './device.js', './locations.js', './shop.js', './settings.js', './backup.js', './catalog.js', './stores.js', './recipes.js', './basicos.js', './productdb.js', './especias.js', './quickadd.js', './supermode.js', './stockin.js', './off.js', './menu.js', './nutri.js', './nutridb.js', './healthcfg.js', './merge3.js',
   './manifest.webmanifest', './icon-192.png', './icon-512.png', './apple-touch-icon.png',
 ];
 const LIB_HOST = 'unpkg.com';

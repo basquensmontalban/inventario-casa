@@ -31,6 +31,8 @@ async function run(store, mode, fn) {
 
 export const kvGet = (k) => run('kv', 'readonly', (s) => s.get(k));
 export const kvSet = (k, v) => run('kv', 'readwrite', (s) => s.put(v, k));
+// Varias claves en una sola operación: o se guardan todas o ninguna.
+export const kvSetMany = (obj) => run('kv', 'readwrite', (s) => { for (const [k, v] of Object.entries(obj)) s.put(v, k); });
 export const photoGet = (k) => run('photos', 'readonly', (s) => s.get(k));
 export const photoSet = (k, v) => run('photos', 'readwrite', (s) => s.put(v, k));
 export const photoDel = (k) => run('photos', 'readwrite', (s) => s.delete(k));

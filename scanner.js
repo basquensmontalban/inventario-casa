@@ -25,7 +25,7 @@ export function scanBarcode(title = 'Escanea el código de barras') {
     wrap.className = 'scanner';
     wrap.innerHTML = `
       <div class="scanner-top">
-        <span>${title}</span>
+        <span class="scanner-title"></span>
         <button class="icon-btn light" data-close aria-label="Cerrar">✕</button>
       </div>
       <div id="reader"></div>
@@ -34,6 +34,8 @@ export function scanBarcode(title = 'Escanea el código de barras') {
         <input inputmode="numeric" placeholder="…o escribe el código" autocomplete="off">
         <button class="btn primary">OK</button>
       </form>`;
+    // El título puede llevar texto escrito por vosotros (nombre de una marca): se pone como texto, nunca como HTML.
+    wrap.querySelector('.scanner-title').textContent = title;
     document.body.append(wrap);
     let scanner = null;
     let finished = false;

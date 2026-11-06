@@ -1,13 +1,23 @@
 // Estado de la app, cambios, fusión entre móviles y cálculos derivados.
-import { kvGet, kvSet } from './db.js';
+import { kvGet, kvSet, kvSetMany } from './db.js';
+import { mergeRecord, merge3 } from './merge3.js';
 
 export const GENERAL = 'general';
-export const UNITS = { ud: 'ud.', kg: 'kg', g: 'g', l: 'l', ml: 'ml' };
+export const UNITS = { ud: 'ud.', kg: 'kg', g: 'g', l: 'l', ml: 'ml', rac: 'rac.' };
 export const SCHEMA = 8;
 const COLLECTIONS = ['products', 'lists', 'items', 'locations', 'tags', 'stores', 'recipes', 'recipeGroups', 'menu', 'freq', 'people', 'recipeFavs', 'recipeRatings'];
 
 export const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
-const now = () => Date.now();
+// Marca de tiempo de cada cambio. Nunca va hacia atrás respecto a lo que ya se ha visto (aunque el reloj
+// del otro móvil vaya adelantado), para que un cambio nuevo siempre cuente como posterior al anterior.
+let maxU = 0;
+const now = () => (maxU = Math.max(Date.now(), maxU + 1));
+export const stamp = now;
+const seen = (data) => {
+  if (!data) return;
+  for (const k of COLLECTIONS) for (const r of Object.values(data[k] || {})) if (+r.u > maxU) maxU = +r.u;
+  if (+data.settings?.u > maxU) maxU = +data.settings.u;
+};
 export const clone = (o) => JSON.parse(JSON.stringify(o));
 export const norm = (s) => String(s || '').trim().toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
 
@@ -45,18 +55,30 @@ function emptyState() {
 
 export let S = null;      // estado común (va a Drive)
 export let meta = {};     // datos técnicos solo de este móvil
+// Última versión de Drive que este móvil ya tiene incorporada: sirve para saber qué ha cambiado
+// cada móvil desde entonces y juntar los dos cambios en vez de quedarse solo con uno.
+let base = null;
+export const getBase = () => base;
+export async function setBase(data, md5) {
+  base = data ? (typeof data === 'string' ? JSON.parse(data) : clone(data)) : null;
+  meta.baseMd5 = base ? md5 || null : null;
+  await kvSetMany({ state: S, meta, base });
+}
 const listeners = new Set();
 export const onChange = (fn) => listeners.add(fn);
 
 export async function load() {
   S = (await kvGet('state')) || emptyState();
   meta = (await kvGet('meta')) || {};
+  base = (await kvGet('base')) || null;
+  if (!base) meta.baseMd5 = null;
   if ((S.v || 1) < SCHEMA && Object.keys(S.products || {}).length) {
     // Guarda los datos tal como estaban antes de actualizar; se subirán también a Drive.
     await kvSet('state-before-v' + SCHEMA, clone(S));
     meta.pendingUpgradeBackup = true;
   }
   ensure();
+  seen(S);
   refreshAuto();
   await kvSet('state', S);
   await saveMeta();
@@ -561,20 +583,43 @@ export function refreshAuto() {
   }
 }
 
-// ── Fusión con la copia de Drive (gana el cambio más reciente de cada registro) ──
-export function merge(remote) {
+// ── Fusión con la copia de Drive ──
+// Con la versión común (base) se sabe quién cambió cada registro: si solo cambió uno, vale ese cambio;
+// si cambiaron los dos, se juntan (existencias sumando lo que cambió cada uno, el resto campo a campo).
+// Sin versión común (primera vez), gana el cambio más reciente.
+export function merge(remote, { useBase = true } = {}) {
   if (!remote) return false;
   linkCache = null;
+  seen(remote);
+  const B = useBase ? base : null;
   let changed = false;
   for (const k of COLLECTIONS) {
     for (const [id, rv] of Object.entries(remote[k] || {})) {
       const lv = S[k][id];
-      if (!lv || (rv.u || 0) > (lv.u || 0)) { S[k][id] = rv; changed = true; }
+      if (!lv) { S[k][id] = rv; changed = true; continue; }
+      const lu = +lv.u || 0;
+      const ru = +rv.u || 0;
+      if (ru === lu) continue;
+      const bv = B?.[k]?.[id];
+      if (bv) {
+        const bu = +bv.u || 0;
+        if (ru <= bu) continue;                          // en Drive no hay nada nuevo (o es una copia vieja): se queda lo de aquí
+        S[k][id] = lu === bu ? rv : mergeRecord(lv, rv, bv);   // solo cambió el otro móvil, o cambiaron los dos
+        changed = true;
+      } else if (ru > lu) { S[k][id] = rv; changed = true; }
     }
   }
-  if ((remote.settings?.u || 0) > (S.settings.u || 0)) {
-    S.settings = { ...S.settings, ...remote.settings };
-    changed = true;
+  const rs = remote.settings;
+  if (rs) {
+    const ls = S.settings;
+    const lu = +ls.u || 0;
+    const ru = +rs.u || 0;
+    const bs = B?.settings;
+    const bu = +bs?.u || 0;
+    if (ru !== lu) {
+      if (bs && ru > bu && lu !== bu) { S.settings = { ...merge3(ls, rs, bs, ru > lu), u: Math.max(ru, lu) + 1 }; changed = true; }
+      else if (bs ? ru > bu : ru > lu) { S.settings = { ...ls, ...rs }; changed = true; }
+    }
   }
   if ((remote.backupInfo?.u || 0) > (S.backupInfo?.u || 0)) {
     S.backupInfo = remote.backupInfo;
@@ -583,19 +628,21 @@ export function merge(remote) {
   // Conserva datos de versiones más nuevas de la app que esta todavía no conoce.
   for (const [k, v] of Object.entries(remote)) if (!(k in S)) S[k] = v;
   ensure();
+  seen(S);
   return changed;
 }
 
+// ¿Hay algo aquí que Drive no tenga? (Después de fusionar, cualquier diferencia es un cambio de este móvil.)
 export function newerThan(remote) {
   if (!remote) return true;
   for (const k of COLLECTIONS) {
     for (const [id, lv] of Object.entries(S[k])) {
       const rv = remote[k]?.[id];
-      if (!rv || (lv.u || 0) > (rv.u || 0)) return true;
+      if (!rv || (+lv.u || 0) !== (+rv.u || 0)) return true;
     }
   }
   if ((S.backupInfo?.u || 0) > (remote.backupInfo?.u || 0)) return true;
-  return (S.settings.u || 0) > (remote.settings?.u || 0) || (remote.v || 1) < SCHEMA;
+  return (+S.settings.u || 0) !== (+remote.settings?.u || 0) || (remote.v || 1) < SCHEMA;
 }
 
 // ── Formatos ───────────────────────────────────────────────
@@ -709,7 +756,7 @@ export function convertQty(qty, from, to) {
 const lw = (s) => norm(s).split(/[^a-z0-9ñ]+/).filter(Boolean);
 export function guessProduct(name) {
   const w = new Set(lw(name));
-  const ps = alive(S.products);
+  const ps = alive(S.products).filter((p) => !p.tupper);
   const exact = ps.find((p) => norm(p.name) === norm(name));
   if (exact) return exact.id;
   const cands = ps.filter((p) => { const pw = lw(p.name); return pw.length && pw.every((x) => w.has(x)); });
@@ -749,7 +796,7 @@ export function recipeStatus(r) {
   const missing = ess.filter(miss);
   const missingRec = rec.filter(miss);
   const level = missing.length ? 'many' : rec.length && missingRec.length * 2 >= rec.length ? 'few' : 'ok';
-  return { n: missing.length, missing, missingRec, nRec: rec.length, level };
+  return { n: missing.length, missing, missingRec, nRec: rec.length, level, empty: !ings.length };
 }
 
 // ── Notas de 0 a 10 de cada persona (o de la casa si no hay personas) ──
@@ -799,6 +846,37 @@ export function frequentSuggestions(limit = 10) {
     .filter((f) => f.since > 12 * 3600e3)
     .sort((a, b) => (b.due >= 0.9) - (a.due >= 0.9) || b.due - a.due || b.count - a.count)
     .slice(0, limit);
+}
+
+// ── Tuppers: raciones que sobran al cocinar en cantidad ──
+// Cada receta tiene un artículo «Tupper de …» (en raciones) con un lote por sitio y fecha.
+export const tupperOf = (rid) => alive(S.products).find((p) => p.tupper && p.recipeId === rid) || null;
+export const portionsOf = (rid) => { const p = tupperOf(rid); return p ? total(p) : 0; };
+export const tuppers = () => alive(S.products).filter((p) => p.tupper && total(p) > 0 && S.recipes[p.recipeId] && !S.recipes[p.recipeId].del);
+const findLoc = (re) => alive(S.locations).filter((l) => re.test(norm(l.name))).sort((a, b) => (a.parentId ? 1 : 0) - (b.parentId ? 1 : 0))[0]?.id || null;
+export const freezerLoc = () => findLoc(/congel/);
+export const fridgeLoc = () => findLoc(/nevera|frigo|refri/);
+export function addMonths(ymdStr, n) {
+  const [y, m, d] = ymdStr.split('-').map(Number);
+  const last = new Date(y, m - 1 + n + 1, 0).getDate();
+  return ymd(new Date(y, m - 1 + n, Math.min(d, last)));
+}
+export function saveTupper(r, entries) {
+  let p = tupperOf(r.id);
+  if (!p) {
+    p = { id: uid(), name: 'Tupper de ' + r.name, unit: 'rac', tupper: true, recipeId: r.id, restock: false, alerts: true, min: 0,
+      variants: [], lots: [], tags: [ensureTag('Platos preparados', '🍱')].filter(Boolean), locationId: entries[0]?.locationId || null };
+  } else p = clone(p);
+  let n = 0;
+  for (const e of entries) {
+    if (!(+e.qty > 0)) continue;
+    p.lots.push({ id: uid(), variantId: null, qty: round(e.qty), expiry: e.expiry || null, locationId: e.locationId || null });
+    n += +e.qty;
+  }
+  if (!n) return null;
+  mergeLots(p);
+  putProduct(p);
+  return p;
 }
 
 // ── Menú semanal: un registro por día y comida ──
