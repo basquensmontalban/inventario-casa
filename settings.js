@@ -11,7 +11,8 @@ import { openGroups, openPeople } from './recipes.js';
 import { openHealthSettings, isDefaultHealth } from './healthcfg.js';
 import { slotToggles } from './menu.js';
 
-export const VERSION = '1.10.0';
+import { VERSION } from './version.js';
+export { VERSION };
 
 const pl = (n, one, many) => `${n} ${n === 1 ? one : many}`;
 const TAB_NAMES = { inv: 'Inventario', shop: 'Compra', recipes: 'Recetas', stores: 'Tiendas' };

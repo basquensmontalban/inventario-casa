@@ -127,6 +127,7 @@ En Recetas › «✨ Ideas con lo que tengo» se genera un texto con lo que hay 
 - Cada receta tiene foto, tiempos de preparación y cocción, raciones (se pueden escalar), ingredientes, pasos, notas y fuente.
 - Los ingredientes se **vinculan** con artículos del inventario. Así la receta sale en **verde** si tienes todo a mano, en **naranja** si faltan 1 o 2 y en **rojo** si faltan más. La reserva no cuenta; los ingredientes **básicos** (sal, agua…) y los **opcionales** no cuentan para el color.
 - **A la lista**: añade solo lo que falta o todos los ingredientes (puedes desmarcar).
+- **Ingredientes con sugerencias**: al escribir un ingrediente («ceb») salen debajo los que empiezan así: lo que tenéis en el inventario (marcado «En casa»), los productos de la base de datos de la app (los mismos que se proponen al apuntar en la lista) y los que ya usáis en otras recetas. Si lo que escribes coincide del todo con uno (sin contar tildes ni plurales: «tomate» → «Tomates»), al darle a OK se elige solo; si es una variante tuya («cebolla morada asada»), se queda tal cual. Los de la base de datos que aún no tenéis salen como «… · aún no en casa» y se vinculan solos en cuanto los compréis.
 - **La he cocinado**: descuenta del inventario lo usado y, si sobran raciones, las guarda como **tupper** (ver más abajo).
 - **Filtros**: disponibilidad, tiempo, ingrediente, «Tipo de plato» (desayuno, entrante, primero, plato principal, postre, salsa), «Momento» (desayuno, comida, cena…), «Tipo» (ligero/pesado), favoritas y los que crees en «⚙ Filtros de recetas».
 - **Imprescindibles y recomendados**: la receta sale en 🔴 rojo si falta algún imprescindible, en 🟡 amarillo si tienes lo imprescindible pero faltan la mitad o más de los recomendados, y en 🟢 verde en los demás casos. Si un ingrediente no se vinculó a mano, la app lo busca en el inventario por el nombre cada vez.
@@ -195,7 +196,7 @@ Todo se guarda en el móvil y funciona sin internet. Al volver la conexión, se 
 El lector de códigos se descarga la primera vez que lo usas con conexión; después funciona sin ella.
 Si los dos cambiáis lo mismo a la vez (o sin conexión), la app **junta los dos cambios**: en las existencias suma lo que hizo cada uno (si uno gasta 1 y el otro añade 3, quedan 2 más), en los platos del menú y las etiquetas se quedan los de los dos, y en los demás datos se combina campo a campo. Solo si los dos cambiáis el mismo dato (por ejemplo, el nombre) se queda el más reciente.
 Si una subida a Drive falla, los cambios siguen pendientes y se vuelven a subir solos en la siguiente sincronización.
-Usad los dos móviles con la misma versión de la app: una versión antigua no sabe juntar los cambios.
+Usad los dos móviles con la misma versión de la app. Desde la 1.10.1, si un móvil tiene una versión más antigua que la que ya ha subido el otro, no sube nada: muestra «Actualiza la app» y guarda sus cambios hasta actualizarse.
 
 ## Actualizar la app
 
@@ -208,5 +209,5 @@ Los móviles cogen la versión nueva la segunda vez que abren la app.
 - **Error 400 `redirect_uri_mismatch` al conectar**: la dirección del paso 2.6 no coincide exactamente con la de la app (revisa la barra final).
 - **Error 403 `access_denied`**: la cuenta no está en *Usuarios de prueba* (paso 2.5).
 - **Error de permisos en el calendario**: en `config.js`, cambia `calendar.app.created` por `calendar` y vuelve a conectar.
-- **«Conectar» aparece a menudo**: Google pide renovar el permiso cada hora. Con *Reconectar al abrir la app* activado en Ajustes se hace solo.
+- **«Conectar» aparece a menudo**: Google pide renovar el permiso cada hora. Con *Reconectar al abrir la app* activado en Ajustes se hace solo: al abrir la app y también con ella abierta, cuando lleváis un rato sin tocarla (nunca con una ficha abierta, escribiendo o en el modo súper).
 - **Google vuelve a pedir el permiso completo cada semana**: suele pasar mientras el proyecto de Google Cloud está «En prueba». Para evitarlo: Google Cloud › *Pantalla de consentimiento de OAuth* (o *Audiencia*) › **Publicar aplicación**. Para vuestro uso no hace falta que Google la verifique; si al conectar sale el aviso de «app no verificada», se acepta en *Configuración avanzada › Ir a …*.

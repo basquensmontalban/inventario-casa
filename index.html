@@ -663,6 +663,20 @@
     .meal-tup { width: 12px; font-size: 11px; line-height: 1; align-self: center; }
     .dish-tup { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 2px 8px; font-size: 13px; color: var(--tup); font-weight: 600; margin-top: 6px; }
     .dish-tup .linkbtn { font-size: 13px; padding: 2px 0; }
+    /* Sugerencias al escribir un ingrediente */
+    .ing-name { position: relative; flex: 1; min-width: 0; }
+    .ing-name > .inp { width: 100%; }
+    .ing-sugg { position: absolute; left: 0; right: 0; top: calc(100% + 4px); z-index: 30; background: var(--card); border: 1px solid var(--line);
+      border-radius: 12px; box-shadow: 0 8px 24px rgba(0,0,0,.18); overflow: hidden; max-height: 290px; overflow-y: auto; }
+    .ing-opt { display: flex; align-items: center; gap: 8px; width: 100%; padding: 10px 12px; border: 0; border-bottom: 1px solid var(--line);
+      background: none; color: var(--ink); font: inherit; text-align: left; cursor: pointer; }
+    .ing-opt:last-child { border-bottom: 0; }
+    .ing-opt:active, .ing-opt:hover { background: var(--soft, rgba(127,127,127,.1)); }
+    .ing-opt .sym { width: 22px; text-align: center; flex: none; background: none; padding: 0; }
+    .ing-opt .nm { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+    .ing-opt .kind { flex: none; color: var(--muted); font-size: 12px; }
+    .ing-opt .kind.product { color: var(--accent); font-weight: 600; }
+    .mini-chip.cat { border-style: dashed; color: var(--muted); }
   </style>
 </head>
 <body>

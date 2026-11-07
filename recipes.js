@@ -9,6 +9,8 @@ import {
 } from './ui.js';
 import { renderMenu, addToMenuSheet } from './menu.js';
 import { locSelect, locCrumb } from './locations.js';
+import { scoreText } from './quickadd.js';
+import { BASICOS } from './basicos.js';
 import { recipeNutrition, healthScore, healthLevel, isRedMeat, NRV, MICRO_NAMES, fmtG } from './nutri.js';
 
 const ui = { q: '', avail: '', time: '', ing: '', fav: '', groups: {}, sort: null, mode: 'recipes' };
@@ -623,17 +625,18 @@ export function editRecipe({ id = null, preset = null, onSaved } = {}) {
   // Ingredientes
   const ingBox = h('div');
   const drawIngs = () => ingBox.replaceChildren(...r.ingredients.map((ing) => {
-    const nm = inp({ value: ing.name || '', placeholder: 'Ingrediente', list: 'dl-products', oninput: (e) => { ing.name = e.target.value; },
-      onchange: () => { if (!ing.productIdManual) { ing.productId = guessProduct(ing.name); drawIngs(); } } });
+    const chip = h('span', { class: 'chip-hold' });
+    const drawChip = () => chip.replaceChildren(linkChip(ing, ing.productId && S.products[ing.productId] && !S.products[ing.productId].del ? S.products[ing.productId] : null, drawChip));
+    const nm = ingNameField(ing, drawChip);
     const q = numInput(ing.qty ?? '', { placeholder: 'cant.', oninput: (e) => { ing.qty = num(e.target.value); } });
     const u = select(ING_UNITS, ing.unit || '', { onchange: (e) => { ing.unit = e.target.value; } });
-    const p = ing.productId && S.products[ing.productId];
+    drawChip();
     return h('div', { class: 'ing-edit' },
       h('div', { class: 'ing-row' }, nm,
         h('button', { type: 'button', class: 'icon-btn', 'aria-label': 'Quitar ingrediente', onclick: () => { r.ingredients = r.ingredients.filter((x) => x !== ing); drawIngs(); } }, icon('x'))),
       h('div', { class: 'ing-row2' }, q, u),
       h('div', { class: 'ing-opts' },
-        h('button', { type: 'button', class: 'mini-chip' + (p ? ' on' : ''), onclick: () => linkSheet(ing, drawIngs) }, p ? '🔗 ' + p.name : 'Sin vincular'),
+        chip,
         h('button', { type: 'button', class: 'mini-chip' + (ing.basic ? ' on' : ''), onclick: () => { ing.basic = !ing.basic; drawIngs(); } }, 'Básico'),
         h('button', { type: 'button', class: 'mini-chip' + (ing.optional ? ' on' : ''), onclick: () => { ing.optional = !ing.optional; drawIngs(); } }, 'Recomendado')));
   }));
@@ -702,6 +705,89 @@ export function editRecipe({ id = null, preset = null, onSaved } = {}) {
     } }, 'Borrar receta') : null,
   ]);
   if (isNew && !preset) setTimeout(() => name.focus(), 300);
+}
+
+// ── Nombre del ingrediente con sugerencias ──
+// Al escribir («ceb») salen debajo los ingredientes que empiezan así: lo que tenéis en el inventario,
+// los productos de la base de datos de la app (los mismos que se proponen al apuntar en la lista) y los
+// que ya usáis en otras recetas. Si lo escrito coincide del todo con uno (aunque sea en plural), se coge ese.
+function ingCandidates() {
+  const out = [];
+  const seen = new Set();
+  const add = (c) => { const k = st.nameKey(c.name); if (!k || seen.has(k)) return; seen.add(k); out.push(c); };
+  for (const p of st.products()) {
+    if (p.tupper) continue;
+    const b = st.catalogItem(p.name);
+    add({ kind: 'product', name: p.name, p, symbol: p.symbol || st.productTags(p)[0]?.symbol || b?.symbol || '📦', texts: [p.name, ...(b?.aliases || [])], boost: 6 });
+    if (b) seen.add(st.nameKey(b.name));
+  }
+  for (const b of BASICOS) add({ kind: 'basic', name: b.name, b, symbol: b.symbol, texts: [b.name, ...b.aliases], boost: 0 });
+  for (const r of st.recipes()) for (const i of r.ingredients || []) if (i.name) add({ kind: 'recipe', name: i.name.trim(), symbol: '🍳', texts: [i.name], boost: 2 });
+  return out;
+}
+function ingSuggest(q, limit = 7) {
+  const qn = st.norm(q);
+  if (!qn) return [];
+  const qw = qn.split(/[^a-z0-9ñ]+/).filter(Boolean);
+  return ingCandidates()
+    .map((c) => ({ ...c, score: Math.max(...c.texts.map((t) => scoreText(t, qn, qw))) }))
+    .filter((c) => c.score >= 70)
+    .sort((a, b) => (b.score + b.boost) - (a.score + a.boost) || a.name.length - b.name.length)
+    .slice(0, limit);
+}
+// Coincidencia total con un nombre (o un sinónimo de la base de datos), sin contar tildes ni plurales.
+function ingExact(q) {
+  const k = st.nameKey(q);
+  if (!k) return null;
+  const cs = ingCandidates();
+  return cs.find((c) => st.nameKey(c.name) === k) || cs.find((c) => c.kind !== 'recipe' && c.texts.some((t) => st.nameKey(t) === k)) || null;
+}
+function pickIng(ing, c) {
+  ing.name = c.name;
+  ing.productIdManual = false;
+  ing.productId = c.kind === 'product' ? c.p.id : guessProduct(c.name);
+}
+function ingNameField(ing, redraw) {
+  const input = inp({ value: ing.name || '', placeholder: 'Ingrediente (escribe y elige)', autocomplete: 'off', enterkeyhint: 'done', 'aria-label': 'Ingrediente' });
+  const box = h('div', { class: 'ing-sugg', hidden: true });
+  const kindTxt = (c) => c.kind === 'product' ? (st.atHand(c.p) > 0 ? 'En casa' : 'En el inventario') : c.kind === 'basic' ? 'Base de datos' : 'En otras recetas';
+  const close = () => { box.hidden = true; box.replaceChildren(); };
+  const finish = (c) => {
+    if (c) { pickIng(ing, c); input.value = c.name; }
+    else if (!ing.productIdManual) ing.productId = guessProduct(ing.name);
+    close();
+    redraw();
+  };
+  const draw = () => {
+    const xs = ingSuggest(input.value);
+    if (!xs.length || (xs.length === 1 && st.nameKey(xs[0].name) === st.nameKey(input.value) && st.norm(xs[0].name) === st.norm(input.value))) return close();
+    box.hidden = false;
+    box.replaceChildren(...xs.map((c) => h('button', { type: 'button', class: 'ing-opt',
+      onpointerdown: (e) => e.preventDefault(),   // que no se cierre el teclado antes de elegir
+      onclick: () => { input.value = c.name; finish(c); } },
+    h('span', { class: 'sym' }, c.symbol || '•'), h('span', { class: 'nm' }, c.name), h('small', { class: 'kind ' + c.kind }, kindTxt(c)))));
+  };
+  input.addEventListener('input', () => { ing.name = input.value; draw(); });
+  input.addEventListener('focus', () => { if (input.value) draw(); });
+  input.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); input.blur(); } });
+  // Al terminar (OK del teclado o tocar fuera): si coincide del todo con uno de la lista, se queda ese.
+  input.addEventListener('blur', () => setTimeout(() => {
+    if (!input.isConnected || document.activeElement === input) return;
+    const before = ing.name;
+    ing.name = input.value.trim();
+    const ex = ing.name ? ingExact(ing.name) : null;
+    if (ex || ing.name !== (before || '').trim() || !box.hidden) finish(ex);
+    else if (!ing.productIdManual && !ing.productId) { ing.productId = guessProduct(ing.name); close(); }
+    else close();
+  }, 0));
+  return h('div', { class: 'ing-name' }, input, box);
+}
+// Etiqueta de vínculo: con el artículo del inventario, o con el de la base de datos (se vinculará solo al comprarlo).
+function linkChip(ing, p, redraw) {
+  const b = !p && !ing.productIdManual && ing.name ? st.catalogItem(ing.name) : null;
+  return h('button', { type: 'button', class: 'mini-chip' + (p ? ' on' : b ? ' cat' : ''), onclick: () => linkSheet(ing, redraw),
+    title: b ? 'Aún no está en el inventario: cuando lo compréis se vinculará solo' : '' },
+  p ? '🔗 ' + p.name : b ? `${b.symbol || '📋'} ${b.name} · aún no en casa` : 'Sin vincular');
 }
 
 function linkSheet(ing, redraw) {

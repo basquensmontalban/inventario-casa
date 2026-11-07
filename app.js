@@ -785,12 +785,25 @@ function renderPill() {
   const map = {
     nocfg: ['Sin configurar', 'warn'], auth: ['Conectar', 'warn'], offline: ['Sin conexión', ''],
     syncing: ['Sincronizando', 'busy'], ok: [st.meta.dirty ? 'Pendiente' : 'Al día', 'ok'], error: ['Error', 'bad'], idle: ['…', ''],
+    old: ['Actualiza la app', 'warn'],
   };
+  if (g.sync.status === 'old' && !oldWarned) {
+    oldWarned = true;
+    updateApp(false);
+    toast(`El otro móvil ya usa la versión ${g.sync.newer}. Actualiza esta para seguir sincronizando (no se pierde nada).`, { action: 'Actualizar', ms: 12000, onAction: () => updateApp(true) });
+  }
   const [txt, cls] = map[g.sync.status] || map.idle;
   p.textContent = txt;
   p.className = 'pill ' + cls;
   const typing = $('#main').contains(document.activeElement) && /INPUT|SELECT|TEXTAREA/.test(document.activeElement.tagName);
   if (tab === 'set' && !typing) renderSettings($('#main'));
+}
+
+// Descarga la versión nueva de la app y, si se pide, recarga para usarla (lo pendiente ya está guardado en el móvil).
+let oldWarned = false;
+async function updateApp(reload) {
+  try { await (await navigator.serviceWorker?.getRegistration())?.update(); } catch {}
+  if (reload) { await st.flush(); setTimeout(() => location.reload(), 600); }
 }
 
 let syncTimer;
@@ -799,12 +812,21 @@ function scheduleSync(ms = 2500) {
   syncTimer = setTimeout(() => g.syncNow(), ms);
 }
 
-function maybeSilentLogin() {
+// El permiso de Google dura una hora. Al caducar, se renueva solo (la app va a Google y vuelve en un momento).
+// Con la app abierta solo se hace si no estáis tocando nada: ni una ficha abierta, ni escribiendo, ni en el modo súper.
+let lastTouch = Date.now();
+function maybeSilentLogin({ whileOpen = false } = {}) {
   if (!g.configured() || g.token() || !g.everConnected() || !navigator.onLine) return false;
   if (localStorage.getItem('auto_reconnect') === '0' || sheets.length) return false;
   if (Date.now() - (+localStorage.getItem('last_silent') || 0) < 10 * 60000) return false;
+  if (whileOpen) {
+    if (Date.now() - lastTouch < 45e3 || isSuperOpen() || /INPUT|SELECT|TEXTAREA/.test(document.activeElement?.tagName || '')) return false;
+    // Si la última vez Google pidió que tocarais «Conectar», no se insiste con la app abierta.
+    if (Date.now() - (+localStorage.getItem('silent_failed') || 0) < 6 * 3600e3) return false;
+  }
   localStorage.setItem('last_silent', String(Date.now()));
-  g.login({ silent: true });
+  sessionStorage.setItem('return_tab', tab);
+  st.flush().finally(() => g.login({ silent: true }));
   return true;
 }
 
@@ -829,6 +851,12 @@ async function start() {
   await loadDevice();
   await loadRecent();
   tab = D.startTab === 'inv' || (['stores', 'recipes'].includes(D.startTab) && D.tabs[D.startTab] !== false) ? D.startTab : 'shop';
+  // Al volver de renovar el permiso, se sigue en la misma pestaña.
+  const back = sessionStorage.getItem('return_tab');
+  sessionStorage.removeItem('return_tab');
+  if (res && back && ['inv', 'shop', 'recipes', 'stores', 'set'].includes(back)) tab = back;
+  if (res?.ok) localStorage.removeItem('silent_failed');
+  else if (res?.error && /required/.test(res.error)) localStorage.setItem('silent_failed', String(Date.now()));
 
   $('#btnSettings').append(icon('gear'));
   $('#btnSettings').onclick = () => setTab('set');
@@ -850,6 +878,7 @@ async function start() {
   storesTab.onclick = () => setTab('stores');
   $('#syncPill').onclick = () => {
     if (g.sync.status === 'nocfg') setTab('set');
+    else if (g.sync.status === 'old') updateApp(true);
     else if (g.sync.status === 'auth') g.login();
     else g.syncNow();
   };
@@ -881,8 +910,10 @@ async function start() {
   });
   // Con la compra abierta (o en el modo súper) se sincroniza cada 20 s; si no, cada 5 min.
   let lastAuto = Date.now();
+  for (const ev of ['pointerdown', 'keydown', 'scroll']) addEventListener(ev, () => { lastTouch = Date.now(); }, { capture: true, passive: true });
   setInterval(() => {
     if (document.visibilityState !== 'visible') return;
+    if (!g.token() && maybeSilentLogin({ whileOpen: true })) return;
     const fast = tab === 'shop' || isSuperOpen();
     if (Date.now() - lastAuto >= (fast ? 20e3 : 5 * 60e3)) { lastAuto = Date.now(); g.syncNow(); }
   }, 5000);

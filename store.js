@@ -1,6 +1,7 @@
 // Estado de la app, cambios, fusión entre móviles y cálculos derivados.
 import { kvGet, kvSet, kvSetMany } from './db.js';
 import { mergeRecord, merge3 } from './merge3.js';
+import { BASICOS } from './basicos.js';
 
 export const GENERAL = 'general';
 export const UNITS = { ud: 'ud.', kg: 'kg', g: 'g', l: 'l', ml: 'ml', rac: 'rac.' };
@@ -754,13 +755,45 @@ export function convertQty(qty, from, to) {
 
 // Artículo del inventario que corresponde a un nombre (igual, o todas las palabras del artículo en el nombre).
 const lw = (s) => norm(s).split(/[^a-z0-9ñ]+/).filter(Boolean);
+// Singular sencillo: «tomates» → «tomate», «limones» → «limon», «cebollas» → «cebolla».
+export const singular = (w) => {
+  if (w.length <= 3 || !w.endsWith('s')) return w;
+  const x = w.slice(0, -1);
+  return x.endsWith('e') && /[nlrdzj]e$/.test(x) && x.length > 3 ? x.slice(0, -1) : x;
+};
+// Clave de un nombre sin tildes, mayúsculas ni plurales («Cebollas» y «cebolla» dan lo mismo).
+const keyCache = new Map();
+export function nameKey(s) {
+  const k = String(s || '');
+  let v = keyCache.get(k);
+  if (v === undefined) { v = lw(k).map(singular).join(' '); if (keyCache.size > 5000) keyCache.clear(); keyCache.set(k, v); }
+  return v;
+}
+// Producto de la base de datos de la app (los que se proponen al apuntar en la lista), por nombre o sinónimo.
+let basicIdx = null;
+export function catalogItem(name) {
+  if (!basicIdx) {
+    basicIdx = new Map();
+    for (const b of BASICOS) for (const t of [b.name, ...b.aliases]) { const k = nameKey(t); if (k && !basicIdx.has(k)) basicIdx.set(k, b); }
+  }
+  return basicIdx.get(nameKey(name)) || null;
+}
+// Artículo del inventario que corresponde a un ingrediente: mismo nombre (aunque sea en plural), mismo
+// producto de la base de datos (por sinónimo) o, si no, el artículo cuyas palabras están todas en el ingrediente.
 export function guessProduct(name) {
-  const w = new Set(lw(name));
+  const n = norm(name);
+  if (!n) return null;
   const ps = alive(S.products).filter((p) => !p.tupper);
-  const exact = ps.find((p) => norm(p.name) === norm(name));
+  const exact = ps.find((p) => norm(p.name) === n);
   if (exact) return exact.id;
-  const cands = ps.filter((p) => { const pw = lw(p.name); return pw.length && pw.every((x) => w.has(x)); });
-  cands.sort((a, b) => lw(b.name).length - lw(a.name).length);
+  const k = nameKey(name);
+  const same = ps.find((p) => nameKey(p.name) === k);
+  if (same) return same.id;
+  const b = catalogItem(name);
+  if (b) { const viaB = ps.find((p) => catalogItem(p.name) === b); if (viaB) return viaB.id; }
+  const w = new Set(k.split(' '));
+  const cands = ps.filter((p) => { const pw = nameKey(p.name).split(' ').filter(Boolean); return pw.length && pw.every((x) => w.has(x)); });
+  cands.sort((a, b2) => nameKey(b2.name).split(' ').length - nameKey(a.name).split(' ').length);
   return cands[0]?.id || null;
 }
 let linkCache = null;

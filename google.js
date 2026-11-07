@@ -3,6 +3,7 @@ import { CONFIG } from './config.js';
 import * as st from './store.js';
 import { photoGet, photoSet } from './db.js';
 import { runBackups, backupDue } from './backup.js';
+import { VERSION, cmpVer } from './version.js';
 
 export const DRIVE = 'https://www.googleapis.com/drive/v3';
 export const DRIVE_UP = 'https://www.googleapis.com/upload/drive/v3';
@@ -252,6 +253,14 @@ async function doSync() {
     }
     st.refreshAuto();
 
+    // En Drive hay datos de una versión más nueva de la app: este móvil no sube nada hasta actualizarse
+    // (lo cambiado aquí queda pendiente y se subirá después, juntándolo con lo del otro móvil).
+    if (remote?.app && cmpVer(remote.app, VERSION) > 0) {
+      sync.newer = remote.app;
+      await st.saveMeta();
+      return setStatus('old');
+    }
+
     // El calendario se crea antes de subir los datos, para que el otro móvil lo reutilice.
     let calId = null;
     let calError = null;
@@ -276,6 +285,7 @@ async function doSync() {
     m.dirty = false;
     cleared = true;
     if (st.newerThan(remote)) {
+      st.S.app = VERSION;
       const body = JSON.stringify(st.S);
       if (m.fileId) {
         const r = await api(`${DRIVE_UP}/files/${m.fileId}?uploadType=media&fields=md5Checksum`, {
